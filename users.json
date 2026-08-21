@@ -1,0 +1,41 @@
+{
+  "ahaan": {
+    "name": "Ahaan",
+    "grade": "4",
+    "password_hash": "scrypt:32768:8:1$pZyu7DohU4Cq9DuU$9f16c928262f4577b898f646d75e7e008ab5a361a6770ef86b16674b230df50e335eae039e68988693b62b5f1edd4865e285745ac69d42308c7f2a9933ddad08",
+    "created_at": "2026-08-16T22:05:35.868292+00:00",
+    "last_seen": "2026-08-21T03:22:36.882924+00:00"
+  },
+  "ahaan2": {
+    "name": "Ahaan2",
+    "grade": "4",
+    "password_hash": "scrypt:32768:8:1$c9fngmgw8t7oZGVG$583b36be369b1768989c31fa0cff9d97d9d0b4c0a0a836450688055b6310742da8f52b85c4b6973d79d47fe474ec70bfa01a95d96990bc0c57642947fe3af246",
+    "created_at": "2026-08-17T15:28:25.026359+00:00",
+    "consent_status": "not_required"
+  },
+  "ahaan4": {
+    "name": "Ahaan4",
+    "grade": "5",
+    "password_hash": "scrypt:32768:8:1$H3SI9bOyn5WQvESy$7deb4080141f42c600b0d6660e0bc101eda238dc4a40986c81394d2aebb1deb2b5bce332bb138afcfeb379e5309b31c1b56b3b148a36ce9e79a000253a4b828e",
+    "created_at": "2026-08-17T15:47:46.300613+00:00",
+    "consent_status": "granted",
+    "parent_email": "ahaan2026messages@gmail.com"
+  },
+  "ahaan5": {
+    "name": "Ahaan5",
+    "grade": "10",
+    "password_hash": "scrypt:32768:8:1$eAxXzI8LwoG4Y9dK$7479e69fbb3ae37460370026413c175fd692e6d2497c69533ce048128c0b4ccc5bc9fde27a6706ea8012b219ef046912d1b08d68a340817062332ce0a64e8bd1",
+    "created_at": "2026-08-19T21:32:56.589402+00:00",
+    "consent_status": "not_required",
+    "last_seen": "2026-08-19T21:39:10.658786+00:00"
+  },
+  "a b n": {
+    "name": "A B N",
+    "grade": "5",
+    "password_hash": "scrypt:32768:8:1$l1k3qg2S3fmPRM4t$d7633e670d053a7dbbfa935253a7caec6439adfbb81700878a8ada7a13a2f868e84cfa0f06d89062ebfdd24edc10ec9e11b863abe386392dc397f5b9f77f8a85",
+    "created_at": "2026-08-20T21:50:13.127761+00:00",
+    "consent_status": "granted",
+    "parent_email": "b.nadkarni.coding@gmail.com",
+    "last_seen": "2026-08-21T01:32:09.956289+00:00"
+  }
+}
