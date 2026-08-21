@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Admin — ThinkStep</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+  :root {
+    --bg: #f4f8ff;
+    --card: #ffffff;
+    --primary: #2f6fed;
+    --primary-dark: #1e4fbf;
+    --primary-light: #eaf1ff;
+    --text: #1b2740;
+    --muted: #6b7c99;
+    --border: #dbe6fb;
+    --shadow-md: 0 4px 16px rgba(30, 60, 130, 0.08);
+    --ease: cubic-bezier(.4,0,.2,1);
+    --green: #1f9d55;
+    --green-light: #e8f8ee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 32px;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 800;
+    font-size: 21px;
+    color: var(--primary-dark);
+    text-decoration: none;
+  }
+  .brand span.dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-light);
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 50px 24px 80px;
+  }
+
+  /* Login card */
+  .login-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 36px 34px;
+    box-shadow: var(--shadow-md);
+    max-width: 360px;
+    margin: 40px auto 0;
+  }
+  .login-card h1 { font-size: 20px; margin: 0 0 6px; }
+  .login-card .sub { font-size: 13px; color: var(--muted); margin: 0 0 20px; }
+  .login-card input {
+    width: 100%;
+    padding: 11px 13px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    font-size: 14px;
+    font-family: inherit;
+    margin-bottom: 14px;
+  }
+  .login-card input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
+  .login-card button {
+    width: 100%;
+    padding: 11px;
+    border-radius: 10px;
+    border: none;
+    background: var(--primary);
+    color: white;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .login-card button:hover { background: var(--primary-dark); }
+  .login-card .error-msg {
+    display: none;
+    background: #fff0ef;
+    color: #a5321f;
+    border: 1px solid #f3c6c1;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12.5px;
+    margin-bottom: 14px;
+  }
+  .login-card .error-msg.show { display: block; }
+
+  /* Dashboard */
+  #dashboard { display: none; }
+  .dash-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 22px;
+  }
+  .dash-header h1 { font-size: 24px; margin: 0; }
+  .logout-btn {
+    background: white;
+    border: 1px solid var(--border);
+    color: var(--primary-dark);
+    font-weight: 700;
+    font-size: 12.5px;
+    padding: 8px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  .logout-btn:hover { background: var(--primary-light); }
+
+  .stat-row {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 22px;
+  }
+  .stat-box {
+    flex: 1;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: var(--shadow-md);
+  }
+  .stat-box .num { font-size: 32px; font-weight: 800; color: var(--primary-dark); }
+  .stat-box .label { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+  .stat-box.live .num { color: var(--green); }
+
+  .list-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px 24px;
+    box-shadow: var(--shadow-md);
+  }
+  .list-card h2 { font-size: 15px; margin: 0 0 14px; color: var(--primary-dark); }
+  .account-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13.5px;
+  }
+  .account-row:last-child { border-bottom: none; }
+  .account-row .dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-right: 8px;
+  }
+  .account-row .grade { color: var(--muted); font-size: 12px; }
+  .account-row .dot.offline { background: #c7d2e6; }
+  .account-row .right { display: flex; align-items: center; gap: 10px; }
+  .account-row .last-seen { color: var(--muted); font-size: 11.5px; min-width: 90px; text-align: right; }
+  .account-row .pending-badge {
+    font-size: 10.5px; font-weight: 700; color: #a5321f; background: #fff0ef;
+    border: 1px solid #f3c6c1; border-radius: 6px; padding: 2px 6px;
+  }
+  .empty-note { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .refresh-note { text-align: center; font-size: 11.5px; color: var(--muted); margin-top: 16px; }
+  .stat-box.alert .num { color: #c0392b; }
+  .flag-row {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .flag-row:last-child { border-bottom: none; }
+  .flag-row .flag-who { font-weight: 700; color: var(--text); }
+  .flag-row .flag-time { color: var(--muted); font-size: 11.5px; margin-left: 8px; }
+  .flag-row .flag-msg {
+    margin-top: 4px;
+    color: #a5321f;
+    background: #fff0ef;
+    border: 1px solid #f3c6c1;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="brand"><span class="dot"></span>ThinkStep</a>
+</nav>
+
+<main>
+  <div class="login-card" id="loginCard">
+    <h1>Admin</h1>
+    <div class="sub">This is a private view — only you can see it.</div>
+    <form id="loginForm">
+      <div class="error-msg" id="loginError"></div>
+      <input id="adminPassword" type="password" placeholder="Admin password" autocomplete="current-password" required />
+      <button type="submit" id="loginSubmitBtn">Unlock</button>
+    </form>
+  </div>
+
+  <div id="dashboard">
+    <div class="dash-header">
+      <h1>Who's online</h1>
+      <button class="logout-btn" id="adminLogoutBtn">Log out</button>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat-box live">
+        <div class="num" id="totalOnline">–</div>
+        <div class="label">online right now</div>
+      </div>
+      <div class="stat-box">
+        <div class="num" id="guestCount">–</div>
+        <div class="label">guests</div>
+      </div>
+      <div class="stat-box">
+        <div class="num" id="accountCount">–</div>
+        <div class="label">signed-in students</div>
+      </div>
+    </div>
+
+    <div class="list-card">
+      <h2>Signed-in students online</h2>
+      <div id="accountsList"><div class="empty-note">Loading…</div></div>
+    </div>
+
+    <div class="stat-row" style="margin-top:22px;">
+      <div class="stat-box">
+        <div class="num" id="totalAccounts">–</div>
+        <div class="label">total accounts</div>
+      </div>
+      <div class="stat-box">
+        <div class="num" id="totalFeedback">–</div>
+        <div class="label">feedback (avg <span id="avgRating">–</span>★)</div>
+      </div>
+      <div class="stat-box" id="safetyStatBox">
+        <div class="num" id="totalSafetyFlags">–</div>
+        <div class="label">safety flags</div>
+      </div>
+    </div>
+
+    <div class="list-card" style="margin-top:16px;">
+      <h2>All accounts</h2>
+      <div id="allAccountsList"><div class="empty-note">Loading…</div></div>
+    </div>
+
+    <div class="list-card" style="margin-top:16px;">
+      <h2>Recent safety flags</h2>
+      <div id="safetyFlagsList"><div class="empty-note">Loading…</div></div>
+    </div>
+
+    <div class="refresh-note">Updates automatically every few seconds.</div>
+  </div>
+</main>
+
+<script>
+const loginCard = document.getElementById('loginCard');
+const dashboard = document.getElementById('dashboard');
+const loginForm = document.getElementById('loginForm');
+const loginError = document.getElementById('loginError');
+const adminPassword = document.getElementById('adminPassword');
+const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+const adminLogoutBtn = document.getElementById('adminLogoutBtn');
+const totalOnlineEl = document.getElementById('totalOnline');
+const guestCountEl = document.getElementById('guestCount');
+const accountCountEl = document.getElementById('accountCount');
+const accountsListEl = document.getElementById('accountsList');
+const totalAccountsEl = document.getElementById('totalAccounts');
+const totalFeedbackEl = document.getElementById('totalFeedback');
+const avgRatingEl = document.getElementById('avgRating');
+const totalSafetyFlagsEl = document.getElementById('totalSafetyFlags');
+const safetyStatBox = document.getElementById('safetyStatBox');
+const safetyFlagsListEl = document.getElementById('safetyFlagsList');
+const allAccountsListEl = document.getElementById('allAccountsList');
+
+function timeAgo(iso) {
+  if (!iso) return 'Never logged in';
+  const then = new Date(iso).getTime();
+  const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (diffSec < 90) return 'Just now';
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+  const months = Math.floor(days / 30);
+  return `${months} month${months === 1 ? '' : 's'} ago`;
+}
+
+let pollTimer = null;
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+function showDashboard() {
+  loginCard.style.display = 'none';
+  dashboard.style.display = 'block';
+  fetchAll();
+  if (!pollTimer) pollTimer = setInterval(fetchAll, 5000);
+}
+
+function fetchAll() {
+  fetchOnline();
+  fetchStats();
+  fetchAllAccounts();
+  fetchSafetyFlags();
+}
+
+async function fetchAllAccounts() {
+  try {
+    const res = await fetch('/api/admin/accounts', { cache: 'no-store' });
+    if (res.status === 401) { showLogin(); return; }
+    if (!res.ok) {
+      allAccountsListEl.innerHTML = `<div class="empty-note">Couldn't load accounts (server said ${res.status}). This section is new — make sure the Flask server has been restarted to pick up the latest code.</div>`;
+      return;
+    }
+    const data = await res.json();
+    if (!data.accounts || data.accounts.length === 0) {
+      allAccountsListEl.innerHTML = '<div class="empty-note">No accounts yet.</div>';
+      return;
+    }
+    allAccountsListEl.innerHTML = data.accounts.map(a => `
+      <div class="account-row">
+        <span><span class="dot ${a.online ? '' : 'offline'}"></span>${escapeHtml(a.name)}
+          ${a.consentStatus === 'pending' ? '<span class="pending-badge">pending consent</span>' : ''}
+        </span>
+        <span class="right">
+          <span class="grade">Grade ${escapeHtml(a.grade || '—')}</span>
+          <span class="last-seen">${a.online ? 'Online now' : timeAgo(a.last_seen)}</span>
+        </span>
+      </div>
+    `).join('');
+  } catch (err) {
+    allAccountsListEl.innerHTML = `<div class="empty-note">Couldn't reach the server to load accounts. Retrying…</div>`;
+  }
+}
+
+async function fetchStats() {
+  try {
+    const res = await fetch('/api/admin/stats', { cache: 'no-store' });
+    if (res.status === 401) { showLogin(); return; }
+    if (!res.ok) return;
+    const data = await res.json();
+    totalAccountsEl.textContent = data.totalAccounts;
+    totalFeedbackEl.textContent = data.totalFeedback;
+    avgRatingEl.textContent = data.avgRating != null ? data.avgRating : '–';
+    totalSafetyFlagsEl.textContent = data.totalSafetyFlags;
+    safetyStatBox.classList.toggle('alert', data.totalSafetyFlags > 0);
+  } catch {}
+}
+
+async function fetchSafetyFlags() {
+  try {
+    const res = await fetch('/api/admin/safety-flags', { cache: 'no-store' });
+    if (res.status === 401) { showLogin(); return; }
+    if (!res.ok) {
+      safetyFlagsListEl.innerHTML = `<div class="empty-note">Couldn't load safety flags (server said ${res.status}). Try restarting the Flask server.</div>`;
+      return;
+    }
+    const data = await res.json();
+    if (!data.flags || data.flags.length === 0) {
+      safetyFlagsListEl.innerHTML = '<div class="empty-note">No flags — nothing concerning has been caught.</div>';
+      return;
+    }
+    safetyFlagsListEl.innerHTML = data.flags.map(f => `
+      <div class="flag-row">
+        <span class="flag-who">${escapeHtml(f.who)}</span>
+        <span class="flag-time">${escapeHtml(new Date(f.flagged_at).toLocaleString())}</span>
+        <div class="flag-msg">${escapeHtml(f.message)}</div>
+      </div>
+    `).join('');
+  } catch (err) {
+    safetyFlagsListEl.innerHTML = `<div class="empty-note">Couldn't reach the server to load safety flags. Retrying…</div>`;
+  }
+}
+
+function showLogin() {
+  dashboard.style.display = 'none';
+  loginCard.style.display = 'block';
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function fetchOnline() {
+  try {
+    const res = await fetch('/api/admin/online', { cache: 'no-store' });
+    if (res.status === 401) { showLogin(); return; }
+    if (!res.ok) {
+      accountsListEl.innerHTML = `<div class="empty-note">Couldn't load — server said ${res.status}.</div>`;
+      return;
+    }
+    const data = await res.json();
+    totalOnlineEl.textContent = data.totalOnline;
+    guestCountEl.textContent = data.guestCount;
+    accountCountEl.textContent = data.accounts.length;
+    if (data.accounts.length === 0) {
+      accountsListEl.innerHTML = '<div class="empty-note">No signed-in students online right now.</div>';
+    } else {
+      accountsListEl.innerHTML = data.accounts.map(a => `
+        <div class="account-row">
+          <span><span class="dot"></span>${escapeHtml(a.name)}</span>
+          <span class="grade">Grade ${escapeHtml(a.grade || '—')}</span>
+        </div>
+      `).join('');
+    }
+  } catch {
+    // transient network hiccup — just try again on the next poll
+  }
+}
+
+loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  loginError.classList.remove('show');
+  loginSubmitBtn.disabled = true;
+  try {
+    const res = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: adminPassword.value }),
+    });
+    const result = await res.json();
+    if (!res.ok) {
+      loginError.textContent = result.error || 'Something went wrong.';
+      loginError.classList.add('show');
+      return;
+    }
+    adminPassword.value = '';
+    showDashboard();
+  } catch {
+    loginError.textContent = "Couldn't reach the server.";
+    loginError.classList.add('show');
+  } finally {
+    loginSubmitBtn.disabled = false;
+  }
+});
+
+adminLogoutBtn.addEventListener('click', async () => {
+  try { await fetch('/api/admin/logout', { method: 'POST' }); } catch {}
+  showLogin();
+});
+
+// On load, check if we're already an authenticated admin (session cookie).
+(async function initCheck() {
+  try {
+    const res = await fetch('/api/admin/online', { cache: 'no-store' });
+    if (res.ok) { showDashboard(); }
+  } catch {}
+})();
+</script>
+
+</body>
+</html>
