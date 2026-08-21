@@ -1,0 +1,2142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
+<title>ThinkStep — Learn, don't just get answers</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<style>
+  :root {
+    --bg: #f4f8ff;
+    --card: #ffffff;
+    --primary: #2f6fed;
+    --primary-dark: #1e4fbf;
+    --primary-light: #eaf1ff;
+    --accent: #7fb2ff;
+    --text: #1b2740;
+    --muted: #6b7c99;
+    --border: #dbe6fb;
+    --bubble-user: #2f6fed;
+    --bubble-user-text: #ffffff;
+    --bubble-ai: #eef4ff;
+    --radius: 16px;
+    --shadow-sm: 0 1px 2px rgba(30, 60, 130, 0.06);
+    --shadow-md: 0 4px 16px rgba(30, 60, 130, 0.08);
+    --ease: cubic-bezier(.4,0,.2,1);
+  }
+  * { box-sizing: border-box; }
+  html { scrollbar-width: thin; scrollbar-color: var(--accent) transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c3d7fb; border-radius: 8px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: 240px 1fr 264px;
+    grid-template-rows: auto auto 1fr;
+    height: 100vh;
+  }
+  header {
+    grid-column: 1 / 4;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: var(--card);
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    z-index: 2;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 800;
+    font-size: 21px;
+    color: var(--primary-dark);
+    letter-spacing: -0.01em;
+  }
+  .brand span.dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--primary);
+    display: inline-block;
+    box-shadow: 0 0 0 4px var(--primary-light);
+  }
+  .tagline {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+  .model-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .model-picker label {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  select#model {
+    padding: 8px 34px 8px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6"><path d="M0 0l5 6 5-6z" fill="%232f6fed"/></svg>') no-repeat right 12px center;
+    appearance: none;
+    -webkit-appearance: none;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--primary-dark);
+    cursor: pointer;
+    transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+  }
+  select#model:hover { border-color: var(--accent); }
+  select#model:focus { outline: none; box-shadow: 0 0 0 3px var(--primary-light); border-color: var(--primary); }
+
+  .model-select-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #modelInfoBtn {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: white;
+    color: var(--primary);
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background .12s var(--ease), border-color .12s var(--ease);
+  }
+  #modelInfoBtn:hover { background: var(--primary-light); border-color: var(--accent); }
+  .model-popover {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 260px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-md);
+    padding: 12px 14px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text);
+    z-index: 50;
+  }
+  .model-popover.open { display: block; animation: msgIn .15s var(--ease); }
+  .model-popover .mp-name {
+    font-weight: 700;
+    color: var(--primary-dark);
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .model-popover .mp-usage {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--primary-dark);
+  }
+  .model-popover .mp-usage.low { color: #b3540c; }
+
+  /* CONNECTION BANNER */
+  #connBanner {
+    display: none;
+    grid-column: 1 / 4;
+    background: linear-gradient(90deg, #fff6e5, #fff3e0);
+    color: #8a5a00;
+    border-bottom: 1px solid #f0d9a8;
+    padding: 9px 24px;
+    font-size: 13px;
+    text-align: center;
+  }
+  #connBanner.show { display: block; animation: slideDown .2s var(--ease); }
+  #connBanner code {
+    background: rgba(0,0,0,0.06);
+    padding: 1px 6px;
+    border-radius: 5px;
+  }
+
+  /* SEASONAL BANNER (summer / back-to-school) */
+  #seasonalBanner {
+    display: none;
+    grid-column: 1 / 4;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 10px 24px;
+    font-size: 13.5px;
+    font-weight: 600;
+    text-align: center;
+  }
+  #seasonalBanner.show { display: flex; animation: slideDown .2s var(--ease); }
+  #seasonalBanner.summer {
+    background: linear-gradient(90deg, #fff8e1, #fff3d6);
+    color: #8a6300;
+    border-bottom: 1px solid #f5deA0;
+  }
+  #seasonalBanner.backtoschool {
+    background: linear-gradient(90deg, #eaf1ff, #e3edff);
+    color: var(--primary-dark);
+    border-bottom: 1px solid var(--border);
+  }
+  #seasonalBanner .close-banner {
+    background: none;
+    border: none;
+    font-size: 15px;
+    cursor: pointer;
+    color: inherit;
+    opacity: .6;
+    padding: 0 2px;
+  }
+  #seasonalBanner .close-banner:hover { opacity: 1; }
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* LEFT SIDEBAR */
+  .sidebar-left {
+    border-right: 1px solid var(--border);
+    background: var(--card);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .sidebar-left .section-title {
+    padding: 16px 16px 6px;
+    font-size: 11px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  #newChatBtn {
+    margin: 16px 14px 4px;
+    padding: 11px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: background .15s var(--ease), transform .1s var(--ease), box-shadow .15s var(--ease);
+  }
+  #newChatBtn:hover { background: var(--primary-dark); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  #newChatBtn:active { transform: translateY(0); }
+  #chatList {
+    list-style: none;
+    margin: 0;
+    padding: 4px 8px 12px;
+    flex: 1;
+  }
+  #chatList li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 10px 11px;
+    border-radius: 9px;
+    cursor: pointer;
+    font-size: 13.5px;
+    color: var(--text);
+    margin-bottom: 2px;
+    transition: background .12s var(--ease);
+  }
+  #chatList li:hover { background: var(--primary-light); }
+  #chatList li.active { background: var(--primary-light); font-weight: 700; color: var(--primary-dark); }
+  #chatList li .title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+  #chatList li .del {
+    opacity: 0;
+    color: var(--muted);
+    font-size: 15px;
+    padding: 0 4px;
+    transition: opacity .12s var(--ease), color .12s var(--ease);
+  }
+  #chatList li:hover .del { opacity: 1; }
+  #chatList li .del:hover { color: #d64545; }
+  /* On any touch device (phones AND tablets — not just narrow screens),
+     there's no hover, so the delete button would otherwise be invisible
+     and untappable. Show it always when the device has no real hover. */
+  @media (hover: none) {
+    #chatList li .del { opacity: 1; }
+  }
+
+  /* MAIN CHAT */
+  .chat-area {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .chat-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--card);
+  }
+  #feedbackLink {
+    padding: 7px 14px;
+    font-size: 12.5px;
+    background: white;
+    color: var(--primary-dark);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    font-weight: 600;
+    transition: background .15s var(--ease);
+  }
+  #feedbackLink:hover { background: var(--primary-light); }
+  #exportBtn {
+    padding: 7px 14px;
+    font-size: 12.5px;
+    background: white;
+    color: var(--primary-dark);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    font-weight: 600;
+    transition: background .12s var(--ease), border-color .12s var(--ease);
+  }
+  #exportBtn:hover { background: var(--primary-light); border-color: var(--accent); }
+
+  main {
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .msg {
+    max-width: 75%;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    line-height: 1.55;
+    font-size: 15px;
+    white-space: pre-wrap;
+    box-shadow: var(--shadow-sm);
+    animation: msgIn .18s var(--ease);
+  }
+  @keyframes msgIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--bubble-user);
+    color: var(--bubble-user-text);
+    border-bottom-right-radius: 4px;
+  }
+  .msg.ai {
+    align-self: flex-start;
+    background: var(--bubble-ai);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.ai::before {
+    content: "🧠 ThinkStep";
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--primary-dark);
+    margin-bottom: 4px;
+  }
+  .typing-dots {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    padding: 2px 0;
+  }
+  .typing-dots span {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    animation: typingBounce 1.1s infinite ease-in-out;
+  }
+  .typing-dots span:nth-child(2) { animation-delay: .15s; }
+  .typing-dots span:nth-child(3) { animation-delay: .3s; }
+  @keyframes typingBounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: .5; }
+    30% { transform: translateY(-4px); opacity: 1; }
+  }
+  .typing-note {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  footer {
+    padding: 16px 24px 22px;
+    background: var(--card);
+    border-top: 1px solid var(--border);
+  }
+  #form {
+    display: flex;
+    gap: 8px;
+  }
+  input#prompt {
+    flex: 1;
+    padding: 13px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    font-size: 15px;
+    outline: none;
+    background: var(--bg);
+    transition: border-color .15s var(--ease), background .15s var(--ease), box-shadow .15s var(--ease);
+  }
+  input#prompt:focus { border-color: var(--primary); background: white; box-shadow: 0 0 0 3px var(--primary-light); }
+  button {
+    padding: 0 22px;
+    border: none;
+    border-radius: 12px;
+    background: var(--primary);
+    color: white;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .15s var(--ease), transform .1s var(--ease), box-shadow .15s var(--ease);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:hover { background: var(--primary-dark); box-shadow: var(--shadow-md); }
+  button:active { transform: translateY(1px); }
+  button:disabled { background: #b9c8e6; cursor: not-allowed; box-shadow: none; transform: none; }
+  .empty-state {
+    margin: auto;
+    text-align: center;
+    color: var(--muted);
+    animation: msgIn .25s var(--ease);
+  }
+  .empty-state h2 { color: var(--primary-dark); margin-bottom: 6px; font-size: 22px; }
+
+  /* MIC BUTTON */
+  #micBtn {
+    padding: 0 16px;
+    background: white;
+    color: var(--primary-dark);
+    border: 1px solid var(--border);
+  }
+  #micBtn:hover { background: var(--primary-light); }
+  #micBtn.recording {
+    background: #d64545;
+    color: white;
+    border-color: #d64545;
+    animation: pulse 1.1s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(214,69,69,.4); }
+    50% { box-shadow: 0 0 0 6px rgba(214,69,69,0); }
+  }
+  #micBtn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* RIGHT SIDEBAR */
+  .sidebar-right {
+    border-left: 1px solid var(--border);
+    background: var(--card);
+    overflow-y: auto;
+    padding: 16px;
+  }
+  .tool-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 13px;
+    margin-bottom: 14px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow .15s var(--ease);
+  }
+  .tool-card:hover { box-shadow: var(--shadow-md); }
+  .tool-card h3 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--primary-dark);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .timer-display {
+    font-size: 30px;
+    font-weight: 800;
+    text-align: center;
+    color: var(--primary-dark);
+    margin: 4px 0 10px;
+    letter-spacing: .02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .timer-controls {
+    display: flex;
+    gap: 6px;
+  }
+  .feedback-card { background: linear-gradient(160deg, var(--primary-light), var(--card)); }
+  .feedback-card-text {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+    margin: 0 0 10px;
+  }
+  .feedback-card-btn {
+    display: block;
+    text-align: center;
+    text-decoration: none;
+    box-shadow: var(--shadow-sm);
+    transition: background .15s var(--ease), transform .1s var(--ease);
+  }
+  .feedback-card-btn:hover { background: var(--primary-dark); transform: translateY(-1px); }
+
+  .timer-controls button, .tool-card .small-btn {
+    flex: 1;
+    padding: 8px;
+    font-size: 12.5px;
+    border-radius: 9px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .timer-controls button.secondary {
+    background: white;
+    color: var(--primary-dark);
+    border: 1px solid var(--border);
+  }
+  textarea#notes {
+    width: 100%;
+    min-height: 90px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    padding: 9px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    background: white;
+    transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+  }
+  textarea#notes:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
+  .formula-subject {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--primary-dark);
+    margin: 10px 0 4px;
+  }
+  .formula-subject:first-child { margin-top: 0; }
+  .formula-hint {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+  .formula-list {
+    margin: 0;
+    padding-left: 16px;
+    font-size: 12.5px;
+    color: var(--text);
+    line-height: 1.65;
+  }
+  #explainBtn {
+    width: 100%;
+  }
+
+  /* DIFFICULTY TOGGLE */
+  .difficulty-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+  .difficulty-row button {
+    flex: 1;
+    padding: 7px 4px;
+    font-size: 11px;
+    border-radius: 9px;
+    background: white;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .difficulty-row button.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+  }
+
+  /* ACCOUNT CARD */
+  .account-status {
+    font-size: 12.5px;
+    color: var(--text);
+    line-height: 1.5;
+    margin-bottom: 10px;
+  }
+  .account-status strong { color: var(--primary-dark); }
+  .account-status .guest-bar {
+    height: 6px;
+    border-radius: 4px;
+    background: var(--border);
+    margin-top: 8px;
+    overflow: hidden;
+  }
+  .account-status .guest-bar-fill {
+    height: 100%;
+    background: var(--primary);
+    border-radius: 4px;
+    transition: width .2s var(--ease);
+  }
+  .account-status .guest-bar-fill.low { background: #d64545; }
+  .account-buttons {
+    display: flex;
+    gap: 6px;
+  }
+  .account-buttons button {
+    flex: 1;
+    padding: 8px;
+    font-size: 12.5px;
+  }
+  .account-buttons button.secondary {
+    background: white;
+    color: var(--primary-dark);
+    border: 1px solid var(--border);
+  }
+
+  /* ACCOUNT MODAL */
+  #accountOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 30, 60, 0.45);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  #accountOverlay.open { display: flex; }
+  #forgotPasswordOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 30, 60, 0.45);
+    z-index: 101;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  #forgotPasswordOverlay.open { display: flex; }
+  .link-btn {
+    background: none;
+    border: none;
+    color: var(--primary);
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0;
+    font-size: 12px;
+  }
+  .account-modal {
+    background: white;
+    border-radius: 18px;
+    padding: 26px;
+    width: 100%;
+    max-width: 360px;
+    box-shadow: var(--shadow-md);
+    animation: msgIn .18s var(--ease);
+  }
+  .account-modal h2 {
+    margin: 0 0 4px;
+    font-size: 19px;
+    color: var(--primary-dark);
+  }
+  .account-modal .sub {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-bottom: 18px;
+  }
+  .account-modal label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+    margin-top: 12px;
+  }
+  .account-modal input, .account-modal select {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    font-size: 14px;
+    font-family: inherit;
+    background: white;
+    color: var(--text);
+  }
+  .account-modal input:focus, .account-modal select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
+  .account-modal .remember-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-top: 14px;
+    cursor: pointer;
+  }
+  .account-modal .remember-row input {
+    width: auto;
+    margin: 0;
+    cursor: pointer;
+  }
+  .account-modal .field-hint {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+  #ageFieldWrap { margin-top: 14px; }
+  .account-modal .error-msg {
+    display: none;
+    background: #fff0ef;
+    color: #a5321f;
+    border: 1px solid #f3c6c1;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12.5px;
+    margin-top: 14px;
+  }
+  .account-modal .error-msg.show { display: block; }
+  .account-modal .submit-btn {
+    width: 100%;
+    margin-top: 18px;
+    padding: 12px;
+  }
+  .account-modal .switch-mode {
+    text-align: center;
+    margin-top: 14px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .account-modal .switch-mode button {
+    background: none;
+    border: none;
+    color: var(--primary);
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0;
+    font-size: 12.5px;
+  }
+  .account-modal .close-btn {
+    float: right;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+
+  /* STREAK / PROGRESS */
+  .streak-stats {
+    display: flex;
+    gap: 10px;
+  }
+  .streak-stat {
+    flex: 1;
+    text-align: center;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    padding: 10px 4px;
+  }
+  .streak-stat .num {
+    font-size: 21px;
+    font-weight: 800;
+    color: var(--primary-dark);
+  }
+  .streak-stat .label {
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  /* MOBILE / TABLET NAV TOGGLES (hidden on desktop) */
+  .nav-toggle {
+    display: none;
+    padding: 0 12px;
+    background: white;
+    color: var(--primary-dark);
+    border: 1px solid var(--border);
+    font-size: 18px;
+    line-height: 1;
+    border-radius: 10px;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  #overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 30, 60, 0.35);
+    z-index: 30;
+  }
+  #overlay.show { display: block; }
+
+  /* ===== TABLET (<= 1000px): right sidebar becomes a drawer ===== */
+  @media (max-width: 1000px) {
+    .app {
+      grid-template-columns: 240px 1fr;
+    }
+    .sidebar-right {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 280px;
+      max-width: 85vw;
+      z-index: 40;
+      transform: translateX(100%);
+      transition: transform .22s var(--ease);
+      box-shadow: -6px 0 24px rgba(20,30,60,0.15);
+    }
+    .sidebar-right.open { transform: translateX(0); }
+    #toolsToggle { display: inline-flex; align-items: center; justify-content: center; }
+  }
+
+  /* ===== MOBILE (<= 680px): both sidebars become drawers, stacked layout ===== */
+  @media (max-width: 680px) {
+    .app {
+      grid-template-columns: 1fr;
+    }
+    .sidebar-left {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 260px;
+      max-width: 85vw;
+      z-index: 40;
+      transform: translateX(-100%);
+      transition: transform .22s var(--ease);
+      box-shadow: 6px 0 24px rgba(20,30,60,0.15);
+      padding-top: env(safe-area-inset-top);
+      -webkit-overflow-scrolling: touch;
+    }
+    .sidebar-left.open { transform: translateX(0); }
+    #menuToggle { display: inline-flex; align-items: center; justify-content: center; }
+
+    body.drawer-open { overflow: hidden; }
+
+    header {
+      padding: 10px 12px;
+      padding-top: calc(10px + env(safe-area-inset-top));
+      min-height: 52px;
+    }
+    .header-left { gap: 6px; }
+    .brand { font-size: 17px; }
+    .brand span.dot { width: 9px; height: 9px; box-shadow: 0 0 0 3px var(--primary-light); }
+    .tagline { display: none; }
+    .model-picker { gap: 6px; }
+    .model-picker label { display: none; }
+    select#model { font-size: 13px; padding: 9px 28px 9px 10px; max-width: 34vw; min-height: 40px; }
+
+    .nav-toggle { min-width: 42px; min-height: 42px; font-size: 19px; }
+
+    .chat-toolbar { padding: 8px 14px; }
+    #exportBtn { min-height: 38px; }
+
+    main { padding: 14px; gap: 10px; -webkit-overflow-scrolling: touch; }
+    .msg { max-width: 90%; font-size: 15px; padding: 11px 14px; }
+    .empty-state h2 { font-size: 19px; }
+    .empty-state p { font-size: 14px; }
+
+    footer {
+      padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+      position: sticky;
+      bottom: 0;
+    }
+    input#prompt { font-size: 16px; padding: 13px 14px; min-height: 46px; } /* 16px avoids iOS zoom */
+    button { padding: 0 16px; min-height: 46px; }
+    #send { min-width: 64px; }
+    #micBtn { padding: 0; min-width: 46px; }
+
+    /* Right sidebar drawer: bigger touch targets everywhere inside */
+    .sidebar-right {
+      padding-top: calc(16px + env(safe-area-inset-top));
+      padding-bottom: calc(16px + env(safe-area-inset-bottom));
+      -webkit-overflow-scrolling: touch;
+    }
+    .tool-card { padding: 14px; }
+    .account-modal select, .account-modal input { min-height: 40px; font-size: 15px; }
+    .difficulty-row button { min-height: 38px; font-size: 12px; }
+    .timer-controls button { min-height: 40px; }
+    #chatList li { padding: 12px 12px; font-size: 14.5px; }
+    #chatList li .del { opacity: 1; padding: 4px 6px; font-size: 17px; }
+    #newChatBtn { min-height: 46px; font-size: 15px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <div class="header-left">
+      <button type="button" id="menuToggle" class="nav-toggle" title="Chats">☰</button>
+      <div>
+        <a href="/" class="brand" style="text-decoration:none;"><span class="dot"></span>ThinkStep</a>
+        <div class="tagline">I won't just give you the answer — let's figure it out together.</div>
+      </div>
+    </div>
+    <div class="model-picker">
+      <label for="model">Model</label>
+      <div class="model-select-wrap">
+        <select id="model"></select>
+        <button type="button" id="modelInfoBtn" title="What is this model?">ⓘ</button>
+        <div id="modelPopover" class="model-popover"></div>
+      </div>
+      <button type="button" id="toolsToggle" class="nav-toggle" title="Tools">🛠</button>
+    </div>
+  </header>
+
+  <div id="connBanner">⚠️ Can't reach ThinkStep's AI provider right now. Try reloading this page in a moment.</div>
+
+  <div id="seasonalBanner">
+    <span id="seasonalBannerText"></span>
+    <button type="button" class="close-banner" id="seasonalBannerClose" title="Dismiss">✕</button>
+  </div>
+
+  <div id="overlay"></div>
+
+  <div class="sidebar-left">
+    <button id="newChatBtn">+ New Chat</button>
+    <div class="section-title">Your Chats</div>
+    <ul id="chatList"></ul>
+  </div>
+
+  <div class="chat-area">
+    <div class="chat-toolbar">
+      <button type="button" id="exportBtn">⬇ Export summary</button>
+      <a href="/feedback" id="feedbackLink" style="text-decoration:none; display:inline-flex; align-items:center;">💬 Feedback</a>
+    </div>
+    <main id="chat">
+      <div class="empty-state" id="empty">
+        <h2>Hi! I'm ThinkStep 🧠</h2>
+        <p>Ask me something you're working on, and I'll help you think it through.</p>
+      </div>
+    </main>
+    <footer>
+      <form id="form">
+        <input id="prompt" type="text" placeholder="What are you working on?" autocomplete="off" />
+        <button type="button" id="micBtn" title="Speak your question">🎤</button>
+        <button type="submit" id="send">Ask</button>
+      </form>
+    </footer>
+  </div>
+
+  <div class="sidebar-right">
+    <div class="tool-card">
+      <h3>🔐 Account</h3>
+      <div class="account-status" id="accountStatus">Loading…</div>
+      <div class="account-buttons" id="accountButtons">
+        <button type="button" id="signupBtn">Sign Up</button>
+        <button type="button" id="loginBtn" class="secondary">Log In</button>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <h3>🎚 Difficulty</h3>
+      <div class="difficulty-row">
+        <button type="button" class="diff-btn" data-val="easier">Easier</button>
+        <button type="button" class="diff-btn active" data-val="">Just right</button>
+        <button type="button" class="diff-btn" data-val="harder">Harder</button>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <h3>🔥 Progress</h3>
+      <div class="streak-stats">
+        <div class="streak-stat"><div class="num" id="streakNum">0</div><div class="label">day streak</div></div>
+        <div class="streak-stat"><div class="num" id="problemsNum">0</div><div class="label">questions asked</div></div>
+      </div>
+    </div>
+
+
+    <div class="tool-card">
+      <h3>⏱ Focus Timer</h3>
+      <div class="timer-display" id="timerDisplay">25:00</div>
+      <div class="timer-controls">
+        <button id="timerStart">Start</button>
+        <button id="timerReset" class="secondary">Reset</button>
+      </div>
+    </div>
+
+    <div class="tool-card">
+      <h3>📝 Quick Notes</h3>
+      <textarea id="notes" placeholder="Jot down anything you want to remember..."></textarea>
+    </div>
+
+    <div class="tool-card">
+      <h3>🔄 Stuck?</h3>
+      <button id="explainBtn" class="small-btn">Explain that differently</button>
+    </div>
+
+    <div class="tool-card">
+      <h3>📐 Formula Sheet</h3>
+      <div id="formulaSheet"></div>
+    </div>
+
+    <div class="tool-card feedback-card">
+      <h3>⭐ Enjoying ThinkStep?</h3>
+      <p class="feedback-card-text">Tell us what's working or what could be better — we read every review.</p>
+      <a href="/feedback" class="small-btn feedback-card-btn">💬 Leave Feedback</a>
+    </div>
+  </div>
+</div>
+
+<div id="accountOverlay">
+  <div class="account-modal">
+    <button type="button" class="close-btn" id="accountModalClose">✕</button>
+    <h2 id="accountModalTitle">Sign Up</h2>
+    <div class="sub" id="accountModalSub">Just a name, grade, and password — free, and takes a minute.</div>
+    <form id="accountForm">
+      <label for="accName">Your name</label>
+      <input id="accName" type="text" autocomplete="name" required />
+      <div id="gradeFieldWrap">
+        <label for="accGrade">Grade</label>
+        <select id="accGrade">
+          <option value="">Select grade</option>
+        </select>
+      </div>
+      <label for="accPassword">Password</label>
+      <input id="accPassword" type="password" autocomplete="new-password" required />
+      <div id="forgotPasswordRow" style="display:none; margin: -6px 0 10px;">
+        <button type="button" id="forgotPasswordLink" class="link-btn">Forgot password?</button>
+      </div>
+      <div id="ageFieldWrap">
+        <label class="remember-row"><input type="checkbox" id="accIs13" /> I am 13 years old or older</label>
+      </div>
+      <div id="parentEmailWrap" style="display:none;">
+        <label for="accParentEmail">Parent or guardian's email</label>
+        <input id="accParentEmail" type="email" autocomplete="off" />
+        <div class="field-hint">We'll email them to approve this account before it can be used — that's required by law for kids under 13.</div>
+      </div>
+      <div id="recoveryEmailWrap" style="display:none;">
+        <label for="accRecoveryEmail">Recovery email (optional)</label>
+        <input id="accRecoveryEmail" type="email" autocomplete="off" />
+        <div class="field-hint">Only used if you ever need to reset a forgotten password. You can skip this, but without it we won't be able to help you get back in.</div>
+      </div>
+      <label class="remember-row"><input type="checkbox" id="accRemember" checked /> Keep me signed in</label>
+      <div class="error-msg" id="accountError"></div>
+      <button type="submit" class="submit-btn" id="accountSubmitBtn">Create Account</button>
+    </form>
+    <div class="switch-mode">
+      <span id="switchModePrompt">Already have an account?</span>
+      <button type="button" id="switchModeBtn">Log In</button>
+    </div>
+    <div style="text-align:center; margin-top:14px; font-size:11.5px; color:var(--muted);">
+      <a href="/privacy" target="_blank" style="color:inherit; text-decoration:underline;">Privacy Policy</a>
+      &middot; <a href="/terms" target="_blank" style="color:inherit; text-decoration:underline;">Terms of Service</a>
+    </div>
+  </div>
+</div>
+
+<div id="forgotPasswordOverlay">
+  <div class="account-modal">
+    <button type="button" class="close-btn" id="forgotPasswordClose">✕</button>
+    <h2>Reset your password</h2>
+    <div class="sub">Enter your account name — if it has a recovery email on file, we'll send a reset link to it.</div>
+    <form id="forgotPasswordForm">
+      <label for="fpName">Your name</label>
+      <input id="fpName" type="text" autocomplete="name" required />
+      <div class="error-msg" id="forgotPasswordError"></div>
+      <div class="field-hint" id="forgotPasswordSuccess" style="display:none;"></div>
+      <button type="submit" class="submit-btn" id="forgotPasswordSubmitBtn">Send reset link</button>
+    </form>
+  </div>
+</div>
+
+<script>
+const chat = document.getElementById('chat');
+const form = document.getElementById('form');
+const promptEl = document.getElementById('prompt');
+const sendBtn = document.getElementById('send');
+const modelEl = document.getElementById('model');
+const chatListEl = document.getElementById('chatList');
+const newChatBtn = document.getElementById('newChatBtn');
+const explainBtn = document.getElementById('explainBtn');
+
+/* ---------- Difficulty toggle (works for guests and accounts alike) ---------- */
+const DIFFICULTY_KEY = 'thinkstep_difficulty';
+let currentDifficulty = localStorage.getItem(DIFFICULTY_KEY) || '';
+const diffButtons = document.querySelectorAll('.diff-btn');
+diffButtons.forEach(b => {
+  b.classList.toggle('active', b.dataset.val === currentDifficulty);
+  b.addEventListener('click', () => {
+    currentDifficulty = b.dataset.val;
+    diffButtons.forEach(x => x.classList.toggle('active', x === b));
+    localStorage.setItem(DIFFICULTY_KEY, currentDifficulty);
+  });
+});
+
+/* ---------- Grade-based formula sheet ---------- */
+const FORMULA_BANDS = [
+  { max: 2, label: 'Grades 1–2', subjects: {
+    'Math': ['Addition: 3 + 2 = 5', 'Subtraction: 5 − 2 = 3', 'Counting by 2s, 5s, 10s'] } },
+  { max: 4, label: 'Grades 3–4', subjects: {
+    'Math': ['Multiplication: 4 × 3 = 12', 'Division: 12 ÷ 3 = 4', 'Perimeter = add all sides', 'Area of rectangle = length × width'] } },
+  { max: 6, label: 'Grades 5–6', subjects: {
+    'Math': ['Area of rectangle = l × w', 'Area of triangle = ½ × base × height', 'Fractions: a/b + c/b = (a+c)/b'],
+    'Science': ['Speed = distance ÷ time'] } },
+  { max: 8, label: 'Grades 7–8', subjects: {
+    'Math': ['Percent = part/whole × 100', 'Pythagorean: a² + b² = c²', 'Area of circle = πr²', 'Slope = (y₂−y₁)/(x₂−x₁)'],
+    'Science': ['Density = mass ÷ volume', 'Speed = distance ÷ time'] } },
+  { max: 10, label: 'Grades 9–10', subjects: {
+    'Math': ['Quadratic formula: x = (−b ± √(b²−4ac)) / 2a', 'Slope-intercept: y = mx + b', 'sin θ = opposite/hypotenuse'],
+    'Science': ['F = m × a', 'Speed = distance ÷ time', 'Density = mass ÷ volume'] } },
+  { max: 12, label: 'Grades 11–12', subjects: {
+    'Math': ['Derivative of xⁿ: n·xⁿ⁻¹', 'Law of Cosines: c² = a² + b² − 2ab·cos(C)', 'log_b(x): b^y = x'],
+    'Science': ['F = ma', 'PV = nRT', 'KE = ½mv²'] } },
+];
+
+function renderFormulaSheet(gradeStr) {
+  const el = document.getElementById('formulaSheet');
+  const grade = parseInt(gradeStr, 10);
+  if (!grade) {
+    el.innerHTML = `<div class="formula-hint">Sign up or log in and pick your grade to see formulas chosen for your level. Here's a general starter set:</div>
+      <div class="formula-subject">Math</div>
+      <ul class="formula-list">
+        <li>Area of circle: πr²</li>
+        <li>Pythagorean: a² + b² = c²</li>
+      </ul>`;
+    return;
+  }
+  const band = FORMULA_BANDS.find(b => grade <= b.max) || FORMULA_BANDS[FORMULA_BANDS.length - 1];
+  let html = `<div class="formula-subject">${band.label}</div>`;
+  for (const subject in band.subjects) {
+    html += `<div class="formula-subject">${subject}</div><ul class="formula-list">`;
+    band.subjects[subject].forEach(f => { html += `<li>${f}</li>`; });
+    html += `</ul>`;
+  }
+  el.innerHTML = html;
+}
+renderFormulaSheet('');
+
+/* ---------- Model selector ---------- */
+const MODEL_INFO = {
+  'openai/gpt-oss-20b': "⚡ A quick, snappy helper — great for most everyday questions, and usually answers almost instantly.",
+  'openai/gpt-oss-120b': "🌟 The smartest helper here! Thinks extra carefully through trickier problems — a great pick when something needs more reasoning.",
+};
+const modelInfoBtn = document.getElementById('modelInfoBtn');
+const modelPopover = document.getElementById('modelPopover');
+
+const DAILY_LIMITED_MODEL = 'openai/gpt-oss-120b';
+
+async function renderModelInfo() {
+  const name = modelEl.value;
+  const desc = MODEL_INFO[name] || "No description available for this model yet.";
+  let extra = '';
+
+  if (name === DAILY_LIMITED_MODEL) {
+    extra = `<div class="mp-usage">Checking today's usage…</div>`;
+    modelPopover.innerHTML = `<div class="mp-name">${escapeHtml(name)}</div><div>${escapeHtml(desc)}</div>${extra}`;
+    try {
+      const res = await fetch('/api/usage', { cache: 'no-store' });
+      const u = await res.json();
+      if (modelEl.value !== DAILY_LIMITED_MODEL) return; // user switched away while fetching
+      const usageEl = modelPopover.querySelector('.mp-usage');
+      if (usageEl) {
+        if (u.requiresAccount) {
+          usageEl.innerHTML = `🔐 This model needs a free account. <button type="button" class="mp-signup-link">Sign up</button>`;
+          usageEl.classList.add('low');
+          const btn = usageEl.querySelector('.mp-signup-link');
+          if (btn) {
+            btn.style.cssText = 'background:none;border:none;color:var(--primary);font-weight:700;text-decoration:underline;cursor:pointer;padding:0;font-size:inherit;';
+            btn.addEventListener('click', () => { modelPopover.classList.remove('open'); openAccountModal('signup'); });
+          }
+        } else {
+          usageEl.textContent = `🌟 ${u.remaining} of ${u.limit} questions left today (resets at midnight)`;
+          usageEl.classList.toggle('low', u.remaining <= 3);
+        }
+      }
+    } catch {
+      const usageEl = modelPopover.querySelector('.mp-usage');
+      if (usageEl) usageEl.textContent = "Couldn't check today's usage.";
+    }
+  } else {
+    modelPopover.innerHTML = `<div class="mp-name">${escapeHtml(name)}</div><div>${escapeHtml(desc)}</div>`;
+  }
+  modelEl.title = desc;
+}
+
+async function loadModels() {
+  try {
+    const res = await fetch('/api/models');
+    const models = await res.json();
+    modelEl.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
+  } catch (e) {
+    modelEl.innerHTML = '<option>Could not load models</option>';
+  }
+  renderModelInfo();
+}
+
+/* ---------- Account system ---------- */
+let currentUser = null; // { name, grade } or null if guest
+
+const accountStatusEl = document.getElementById('accountStatus');
+const accountButtonsEl = document.getElementById('accountButtons');
+const signupBtn = document.getElementById('signupBtn');
+const loginBtn = document.getElementById('loginBtn');
+const accountOverlay = document.getElementById('accountOverlay');
+const accountModalClose = document.getElementById('accountModalClose');
+const accountModalTitle = document.getElementById('accountModalTitle');
+const accountModalSub = document.getElementById('accountModalSub');
+const accountForm = document.getElementById('accountForm');
+const accName = document.getElementById('accName');
+const gradeFieldWrap = document.getElementById('gradeFieldWrap');
+const accGrade = document.getElementById('accGrade');
+const accPassword = document.getElementById('accPassword');
+const ageFieldWrap = document.getElementById('ageFieldWrap');
+const accIs13 = document.getElementById('accIs13');
+const parentEmailWrap = document.getElementById('parentEmailWrap');
+const accParentEmail = document.getElementById('accParentEmail');
+const recoveryEmailWrap = document.getElementById('recoveryEmailWrap');
+const accRecoveryEmail = document.getElementById('accRecoveryEmail');
+const accRemember = document.getElementById('accRemember');
+const accountError = document.getElementById('accountError');
+const accountSubmitBtn = document.getElementById('accountSubmitBtn');
+const switchModePrompt = document.getElementById('switchModePrompt');
+const switchModeBtn = document.getElementById('switchModeBtn');
+const forgotPasswordRow = document.getElementById('forgotPasswordRow');
+const forgotPasswordLink = document.getElementById('forgotPasswordLink');
+const forgotPasswordOverlay = document.getElementById('forgotPasswordOverlay');
+const forgotPasswordClose = document.getElementById('forgotPasswordClose');
+const forgotPasswordForm = document.getElementById('forgotPasswordForm');
+const fpName = document.getElementById('fpName');
+const forgotPasswordError = document.getElementById('forgotPasswordError');
+const forgotPasswordSuccess = document.getElementById('forgotPasswordSuccess');
+const forgotPasswordSubmitBtn = document.getElementById('forgotPasswordSubmitBtn');
+
+// Grade dropdown 1-12 for the account modal
+for (let g = 1; g <= 12; g++) {
+  const opt = document.createElement('option');
+  opt.value = g;
+  opt.textContent = 'Grade ' + g;
+  accGrade.appendChild(opt);
+}
+
+// Grades 1-6 are essentially always under 13 in a normal school system —
+// don't let the "I am 13+" checkbox be checked for those grades. This
+// matches a server-side check too (the server never trusts the checkbox
+// alone), but doing it here means the form doesn't even offer the option
+// that would just get rejected anyway.
+const GRADES_ALWAYS_UNDER_13 = ['1', '2', '3', '4', '5', '6'];
+const is13Label = accIs13.closest('label');
+const is13Hint = document.createElement('div');
+is13Hint.className = 'field-hint';
+is13Hint.style.display = 'none';
+is13Hint.textContent = "Students in this grade are almost always under 13, so we'll ask for a parent's email instead.";
+ageFieldWrap.appendChild(is13Hint);
+
+function syncAgeGateToGrade() {
+  const forcedUnder13 = GRADES_ALWAYS_UNDER_13.includes(accGrade.value);
+  if (forcedUnder13) {
+    accIs13.checked = false;
+    accIs13.disabled = true;
+    is13Hint.style.display = 'block';
+  } else {
+    accIs13.disabled = false;
+    is13Hint.style.display = 'none';
+  }
+  parentEmailWrap.style.display = accIs13.checked ? 'none' : 'block';
+  accParentEmail.required = !accIs13.checked;
+  recoveryEmailWrap.style.display = accIs13.checked ? 'block' : 'none';
+}
+
+accGrade.addEventListener('change', syncAgeGateToGrade);
+accIs13.addEventListener('change', () => {
+  const under13 = !accIs13.checked;
+  parentEmailWrap.style.display = under13 ? 'block' : 'none';
+  accParentEmail.required = under13;
+  recoveryEmailWrap.style.display = under13 ? 'none' : 'block';
+});
+
+let accountModalMode = 'signup'; // 'signup' | 'login'
+
+function openAccountModal(mode) {
+  accountModalMode = mode;
+  accountError.classList.remove('show');
+  accountForm.reset();
+  accRemember.checked = true;
+  parentEmailWrap.style.display = 'none';
+  accParentEmail.required = false;
+  recoveryEmailWrap.style.display = 'none';
+  accIs13.disabled = false;
+  is13Hint.style.display = 'none';
+  if (mode === 'signup') {
+    accountModalTitle.textContent = 'Sign Up';
+    accountModalSub.textContent = 'Just a name, grade, and password — free, and takes a minute.';
+    gradeFieldWrap.style.display = 'block';
+    accGrade.required = true;
+    ageFieldWrap.style.display = 'block';
+    accIs13.required = false; // it's a checkbox, not literally required — we branch on it instead
+    accountSubmitBtn.textContent = 'Create Account';
+    switchModePrompt.textContent = 'Already have an account?';
+    switchModeBtn.textContent = 'Log In';
+    forgotPasswordRow.style.display = 'none';
+  } else {
+    accountModalTitle.textContent = 'Log In';
+    accountModalSub.textContent = 'Welcome back!';
+    gradeFieldWrap.style.display = 'none';
+    accGrade.required = false;
+    ageFieldWrap.style.display = 'none';
+    accountSubmitBtn.textContent = 'Log In';
+    switchModePrompt.textContent = "Don't have an account yet?";
+    switchModeBtn.textContent = 'Sign Up';
+    forgotPasswordRow.style.display = 'block';
+  }
+  accountOverlay.classList.add('open');
+  setTimeout(() => accName.focus(), 50);
+}
+function closeAccountModal() {
+  accountOverlay.classList.remove('open');
+}
+
+signupBtn.addEventListener('click', () => openAccountModal('signup'));
+loginBtn.addEventListener('click', () => openAccountModal('login'));
+accountModalClose.addEventListener('click', closeAccountModal);
+accountOverlay.addEventListener('click', (e) => { if (e.target === accountOverlay) closeAccountModal(); });
+switchModeBtn.addEventListener('click', () => openAccountModal(accountModalMode === 'signup' ? 'login' : 'signup'));
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAccountModal(); });
+
+accountForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  accountError.classList.remove('show');
+  accountSubmitBtn.disabled = true;
+
+  const endpoint = accountModalMode === 'signup' ? '/api/signup' : '/api/login';
+  const body = accountModalMode === 'signup'
+    ? {
+        name: accName.value.trim(),
+        grade: accGrade.value,
+        password: accPassword.value,
+        remember: accRemember.checked,
+        is13OrOlder: accIs13.checked,
+        parentEmail: accParentEmail.value.trim(),
+        recoveryEmail: accRecoveryEmail.value.trim(),
+      }
+    : { name: accName.value.trim(), password: accPassword.value, remember: accRemember.checked };
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const result = await res.json();
+    if (!res.ok) {
+      accountError.textContent = result.error || 'Something went wrong — try again.';
+      accountError.classList.add('show');
+      return;
+    }
+    if (result.pendingConsent) {
+      // Under 13 — the account was created but stays locked until a
+      // parent clicks the consent link we emailed them.
+      closeAccountModal();
+      const msg = result.emailed
+        ? `We've sent an email to ${result.parentEmail} asking a parent or guardian to approve ${result.name}'s account. Once they click the link, ${result.name} can log in!`
+        : `${result.name}'s account was created, but we couldn't send the approval email to ${result.parentEmail} right now. Ask a grown-up to check the app's setup, or try signing up again later.`;
+      alert(msg);
+      return;
+    }
+    currentUser = { name: result.name, grade: result.grade || '' };
+    closeAccountModal();
+    renderAccountStatus();
+    renderFormulaSheet(currentUser.grade);
+    renderModelInfo(); // in case the smartest model is selected, refresh its "needs account" state
+  } catch (err) {
+    accountError.textContent = "Couldn't reach the server — is it running?";
+    accountError.classList.add('show');
+  } finally {
+    accountSubmitBtn.disabled = false;
+  }
+});
+
+async function logoutUser() {
+  try {
+    await fetch('/api/logout', { method: 'POST' });
+  } catch {}
+  currentUser = null;
+  renderAccountStatus();
+  renderFormulaSheet('');
+  renderModelInfo();
+}
+
+/* ---------- Forgot password ---------- */
+function openForgotPasswordModal() {
+  closeAccountModal();
+  forgotPasswordError.classList.remove('show');
+  forgotPasswordSuccess.style.display = 'none';
+  forgotPasswordForm.reset();
+  forgotPasswordForm.style.display = 'block';
+  forgotPasswordOverlay.classList.add('open');
+  setTimeout(() => fpName.focus(), 50);
+}
+function closeForgotPasswordModal() {
+  forgotPasswordOverlay.classList.remove('open');
+}
+forgotPasswordLink.addEventListener('click', openForgotPasswordModal);
+forgotPasswordClose.addEventListener('click', closeForgotPasswordModal);
+forgotPasswordOverlay.addEventListener('click', (e) => { if (e.target === forgotPasswordOverlay) closeForgotPasswordModal(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && forgotPasswordOverlay.classList.contains('open')) closeForgotPasswordModal(); });
+
+forgotPasswordForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  forgotPasswordError.classList.remove('show');
+  forgotPasswordSubmitBtn.disabled = true;
+  try {
+    const res = await fetch('/api/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: fpName.value.trim() }),
+    });
+    const result = await res.json();
+    forgotPasswordSuccess.textContent = result.message || "If that account exists and has a recovery email on file, we've sent a reset link to it.";
+    forgotPasswordSuccess.style.display = 'block';
+    forgotPasswordForm.querySelector('#fpName').style.display = 'none';
+    forgotPasswordSubmitBtn.style.display = 'none';
+  } catch (err) {
+    forgotPasswordError.textContent = "Couldn't reach the server — is it running?";
+    forgotPasswordError.classList.add('show');
+  } finally {
+    forgotPasswordSubmitBtn.disabled = false;
+  }
+});
+
+/* ---------- Delete account ---------- */
+async function deleteAccountFlow() {
+  const sure = confirm(`Delete ${currentUser ? currentUser.name : 'this'}'s ThinkStep account? This can't be undone — chat progress and account info will be permanently removed.`);
+  if (!sure) return;
+  const password = prompt('Please re-enter your password to confirm:');
+  if (password === null) return;
+  try {
+    const res = await fetch('/api/delete-account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    const result = await res.json();
+    if (!res.ok) {
+      alert(result.error || 'Something went wrong deleting the account.');
+      return;
+    }
+    currentUser = null;
+    renderAccountStatus();
+    renderFormulaSheet('');
+    renderModelInfo();
+    alert('Account deleted.');
+  } catch (err) {
+    alert("Couldn't reach the server — is it running?");
+  }
+}
+
+function renderAccountStatus() {
+  if (currentUser) {
+    accountStatusEl.innerHTML = `Signed in as <strong>${escapeHtml(currentUser.name)}</strong><br><span style="color:var(--muted); font-size:11px;">Grade ${escapeHtml(currentUser.grade || '—')}</span>`;
+    if (!document.getElementById('logoutBtn')) {
+      accountButtonsEl.innerHTML = `
+        <button type="button" id="logoutBtn" class="secondary">Log Out</button>
+        <button type="button" id="deleteAccountBtn" class="link-btn" style="margin-top:8px;">Delete my account</button>
+      `;
+      document.getElementById('logoutBtn').addEventListener('click', logoutUser);
+      document.getElementById('deleteAccountBtn').addEventListener('click', deleteAccountFlow);
+    }
+  } else {
+    if (!document.getElementById('signupBtn')) {
+      accountButtonsEl.innerHTML = `
+        <button type="button" id="signupBtn">Sign Up</button>
+        <button type="button" id="loginBtn" class="secondary">Log In</button>
+      `;
+      document.getElementById('signupBtn').addEventListener('click', () => openAccountModal('signup'));
+      document.getElementById('loginBtn').addEventListener('click', () => openAccountModal('login'));
+    }
+    refreshGuestStatus();
+  }
+}
+
+async function refreshGuestStatus() {
+  try {
+    const res = await fetch('/api/guest-status', { cache: 'no-store' });
+    const g = await res.json();
+    if (currentUser) return; // logged in meanwhile
+    const pct = Math.max(0, Math.min(100, (g.remaining / g.limit) * 100));
+    accountStatusEl.innerHTML = `
+      You're using ThinkStep as a guest.<br>
+      <strong>${g.remaining} of ${g.limit}</strong> free questions left.
+      <div class="guest-bar"><div class="guest-bar-fill ${g.remaining <= 5 ? 'low' : ''}" style="width:${pct}%"></div></div>
+    `;
+  } catch {
+    accountStatusEl.textContent = "You're using ThinkStep as a guest.";
+  }
+}
+
+async function initAccount() {
+  try {
+    const res = await fetch('/api/me', { cache: 'no-store' });
+    const m = await res.json();
+    if (m.loggedIn) {
+      currentUser = { name: m.name, grade: m.grade || '' };
+    }
+  } catch {}
+  renderAccountStatus();
+  renderFormulaSheet(currentUser ? currentUser.grade : '');
+}
+
+modelEl.addEventListener('change', () => {
+  renderModelInfo();
+  modelPopover.classList.add('open');
+});
+modelInfoBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  modelPopover.classList.toggle('open');
+});
+document.addEventListener('click', (e) => {
+  if (!modelPopover.contains(e.target) && e.target !== modelInfoBtn) {
+    modelPopover.classList.remove('open');
+  }
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') modelPopover.classList.remove('open');
+});
+
+/* ---------- Chat session storage ---------- */
+const STORAGE_KEY = 'thinkstep_chats';
+const ACTIVE_KEY = 'thinkstep_active';
+
+function loadChats() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+  } catch { return []; }
+}
+function saveChats(chats) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+}
+function newChatObj() {
+  return { id: 'c' + Date.now(), title: 'New chat', messages: [] };
+}
+
+let chats = loadChats();
+let activeId = localStorage.getItem(ACTIVE_KEY);
+
+if (chats.length === 0) {
+  const c = newChatObj();
+  chats.push(c);
+  activeId = c.id;
+  saveChats(chats);
+  localStorage.setItem(ACTIVE_KEY, activeId);
+}
+if (!chats.find(c => c.id === activeId)) {
+  activeId = chats[0].id;
+  localStorage.setItem(ACTIVE_KEY, activeId);
+}
+
+function getActive() {
+  return chats.find(c => c.id === activeId);
+}
+
+function renderChatList() {
+  chatListEl.innerHTML = '';
+  chats.slice().reverse().forEach(c => {
+    const li = document.createElement('li');
+    li.className = c.id === activeId ? 'active' : '';
+    li.innerHTML = `<span class="title">${escapeHtml(c.title)}</span><span class="del" title="Delete">✕</span>`;
+    li.querySelector('.title').addEventListener('click', () => {
+      activeId = c.id;
+      localStorage.setItem(ACTIVE_KEY, activeId);
+      renderChatList();
+      renderMessages();
+      if (typeof closeDrawers === 'function') closeDrawers();
+    });
+    li.querySelector('.del').addEventListener('click', (e) => {
+      e.stopPropagation();
+      chats = chats.filter(x => x.id !== c.id);
+      if (chats.length === 0) {
+        const nc = newChatObj();
+        chats.push(nc);
+      }
+      if (activeId === c.id) activeId = chats[chats.length - 1].id;
+      saveChats(chats);
+      localStorage.setItem(ACTIVE_KEY, activeId);
+      renderChatList();
+      renderMessages();
+    });
+    chatListEl.appendChild(li);
+  });
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function renderMessages() {
+  const active = getActive();
+  chat.innerHTML = '';
+  if (!active.messages.length) {
+    chat.innerHTML = `<div class="empty-state"><h2>Hi! I'm ThinkStep 🧠</h2><p>Ask me something you're working on, and I'll help you think it through.</p></div>`;
+    return;
+  }
+  active.messages.forEach(m => addMessage(m.role === 'user' ? 'user' : 'ai', m.content));
+}
+
+function addMessage(role, text) {
+  const empty = document.getElementById('empty');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
+  div.textContent = text;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+newChatBtn.addEventListener('click', () => {
+  const c = newChatObj();
+  chats.push(c);
+  activeId = c.id;
+  saveChats(chats);
+  localStorage.setItem(ACTIVE_KEY, activeId);
+  renderChatList();
+  renderMessages();
+  if (typeof closeDrawers === 'function') closeDrawers();
+});
+
+/* ---------- Progress / streak tracking ---------- */
+// Use the student's LOCAL calendar day (not UTC) so the streak only ever
+// changes once per real day for them, no matter how many times they open
+// or reload the page that same day.
+function localDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function daysBetween(dateStrA, dateStrB) {
+  const [ay, am, ad] = dateStrA.split('-').map(Number);
+  const [by, bm, bd] = dateStrB.split('-').map(Number);
+  const a = new Date(ay, am - 1, ad);
+  const b = new Date(by, bm - 1, bd);
+  return Math.round((b - a) / 86400000);
+}
+function updateStreak() {
+  const today = localDateStr(new Date());
+  const lastDate = localStorage.getItem('thinkstep_last_date');
+  let streak = parseInt(localStorage.getItem('thinkstep_streak') || '0', 10);
+
+  if (lastDate !== today) {
+    if (lastDate) {
+      const diffDays = daysBetween(lastDate, today);
+      streak = diffDays === 1 ? streak + 1 : 1; // consecutive day = +1, gap = reset to 1
+    } else {
+      streak = 1; // very first visit ever
+    }
+    localStorage.setItem('thinkstep_last_date', today);
+    localStorage.setItem('thinkstep_streak', streak);
+  }
+  // Note: if lastDate === today, we don't touch the streak at all —
+  // reloading or revisiting later the same day never changes it.
+  document.getElementById('streakNum').textContent = streak;
+}
+function bumpProblemsCount() {
+  const n = parseInt(localStorage.getItem('thinkstep_problems') || '0', 10) + 1;
+  localStorage.setItem('thinkstep_problems', n);
+  document.getElementById('problemsNum').textContent = n;
+}
+function renderProgress() {
+  updateStreak();
+  document.getElementById('problemsNum').textContent = localStorage.getItem('thinkstep_problems') || '0';
+}
+
+/* ---------- Export summary ---------- */
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const active = getActive();
+  let text = `ThinkStep Chat Summary\n`;
+  text += `========================\n`;
+  if (currentUser && currentUser.name) text += `Student: ${currentUser.name}\n`;
+  if (currentUser && currentUser.grade) text += `Grade: ${currentUser.grade}\n`;
+  text += `Chat title: ${active.title}\n`;
+  text += `Date: ${new Date().toLocaleString()}\n\n`;
+
+  text += `Full conversation:\n------------------\n`;
+  active.messages.forEach(m => {
+    text += `${m.role === 'user' ? 'Student' : 'ThinkStep'}: ${m.content}\n\n`;
+  });
+
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `thinkstep-${active.title.replace(/[^a-z0-9]/gi, '_').slice(0, 30)}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+/* ---------- Voice input ---------- */
+const micBtn = document.getElementById('micBtn');
+const originalPlaceholder = promptEl.placeholder;
+const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+// The browser only allows microphone access on a "secure context": pages
+// served over https://, OR pages opened as http://localhost. If you're on
+// your phone/tablet using your PC's IP address (like http://192.168.x.x:5000)
+// that counts as insecure, and the browser will silently refuse — so we
+// detect that case and explain it instead of leaving a dead button.
+const isSecureContext = window.isSecureContext ||
+  location.hostname === 'localhost' ||
+  location.hostname === '127.0.0.1';
+
+function setMicState(state, message) {
+  // state: 'idle' | 'listening' | 'error'
+  micBtn.classList.toggle('recording', state === 'listening');
+  if (state === 'listening') {
+    promptEl.placeholder = '🎤 Listening… speak now';
+  } else if (state === 'error') {
+    promptEl.placeholder = message || 'Voice input had a problem — try again';
+    setTimeout(() => { promptEl.placeholder = originalPlaceholder; }, 2500);
+  } else {
+    promptEl.placeholder = originalPlaceholder;
+  }
+}
+
+if (!SpeechRecognitionAPI) {
+  micBtn.disabled = true;
+  micBtn.title = 'Voice input isn\'t supported in this browser — try Chrome or Edge.';
+} else if (!isSecureContext) {
+  micBtn.disabled = true;
+  micBtn.title = 'Voice input only works on https:// or on localhost. Open ThinkStep at http://localhost:5000 on this computer to use the mic.';
+} else {
+  const recognition = new SpeechRecognitionAPI();
+  recognition.lang = 'en-US';
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+  let listening = false;
+  let baseText = '';
+
+  micBtn.addEventListener('click', () => {
+    if (listening) {
+      recognition.stop();
+      return;
+    }
+    baseText = promptEl.value ? promptEl.value.trim() + ' ' : '';
+    try {
+      recognition.start();
+    } catch (err) {
+      // start() throws if it's already running from a prior click that
+      // hadn't fully stopped yet — just ignore, it'll settle itself.
+    }
+  });
+
+  recognition.addEventListener('start', () => {
+    listening = true;
+    setMicState('listening');
+  });
+
+  recognition.addEventListener('result', (e) => {
+    let transcript = '';
+    for (let i = 0; i < e.results.length; i++) {
+      transcript += e.results[i][0].transcript;
+    }
+    promptEl.value = baseText + transcript;
+  });
+
+  recognition.addEventListener('end', () => {
+    listening = false;
+    setMicState('idle');
+    promptEl.focus();
+  });
+
+  recognition.addEventListener('error', (e) => {
+    listening = false;
+    const messages = {
+      'not-allowed': "Mic access was blocked — allow microphone permission for this site and try again.",
+      'service-not-allowed': "Mic access was blocked — allow microphone permission for this site and try again.",
+      'no-speech': "Didn't catch that — try speaking again.",
+      'audio-capture': "No microphone found on this device.",
+      'network': "Voice input needs an internet connection to work.",
+      'aborted': null, // user tapped stop; not an error worth showing
+    };
+    const msg = messages[e.error] !== undefined ? messages[e.error] : "Voice input had a problem — try again.";
+    setMicState(msg ? 'error' : 'idle', msg);
+  });
+}
+
+/* ---------- AI provider connection check ---------- */
+async function checkConnection() {
+  const banner = document.getElementById('connBanner');
+  try {
+    const res = await fetch('/api/health');
+    if (res.ok) {
+      banner.classList.remove('show');
+    } else {
+      banner.classList.add('show');
+    }
+  } catch {
+    banner.classList.add('show');
+  }
+}
+
+async function sendMessage(text) {
+  const active = getActive();
+  addMessage('user', text);
+  active.messages.push({ role: 'user', content: text });
+  if (active.title === 'New chat') {
+    active.title = text.slice(0, 30) + (text.length > 30 ? '…' : '');
+  }
+  saveChats(chats);
+  renderChatList();
+  sendBtn.disabled = true;
+
+  const aiDiv = addMessage('ai', '');
+  aiDiv.innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span>';
+  chat.scrollTop = chat.scrollHeight;
+
+  // If the model is still loading (common for a big model's first use),
+  // there can be a real wait before the first token arrives. Let the
+  // student know something's actually happening instead of just staring
+  // at bouncing dots with no explanation.
+  const slowNoteTimer = setTimeout(() => {
+    if (aiDiv.querySelector('.typing-dots')) {
+      const note = document.createElement('span');
+      note.className = 'typing-note';
+      note.textContent = "Still thinking — the model may still be warming up, this can take a minute the first time.";
+      aiDiv.appendChild(note);
+      chat.scrollTop = chat.scrollHeight;
+    }
+  }, 12000);
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: modelEl.value, messages: active.messages, profile: { difficulty: currentDifficulty } })
+    });
+
+    // ThinkStep's own /api/chat route always returns text/plain, even for
+    // its own "blocked" messages (limits reached, etc). If we're behind a
+    // tunnel (like the free Cloudflare quick tunnel) and it times out or
+    // errors before reaching our server, we get back an HTML error page
+    // instead — checking for that here stops us from ever showing raw
+    // error-page HTML as if it were the AI's answer.
+    const contentType = res.headers.get('content-type') || '';
+    if (!res.ok || !contentType.includes('text/plain')) {
+      clearTimeout(slowNoteTimer);
+      aiDiv.textContent = res.status === 524
+        ? "The connection timed out before ThinkStep could answer — this can happen with the biggest model while it's still warming up. Try again in a bit, or pick a different model from the dropdown."
+        : `Something went wrong reaching ThinkStep (status ${res.status}). Try again in a moment.`;
+      checkConnection();
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let full = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // \x00 bytes are heartbeats the server sends to keep slow tunnel
+      // connections alive while a big model is still loading — not real
+      // content, so strip them before displaying.
+      const clean = decoder.decode(value, { stream: true }).replace(/\x00/g, '');
+      if (!clean) continue; // pure heartbeat chunk — keep showing the typing dots
+      full += clean;
+      clearTimeout(slowNoteTimer);
+      aiDiv.textContent = full;
+      chat.scrollTop = chat.scrollHeight;
+    }
+    clearTimeout(slowNoteTimer);
+    if (!full) {
+      aiDiv.textContent = "Hmm, no response came through — try asking again.";
+    } else {
+      active.messages.push({ role: 'assistant', content: full });
+      saveChats(chats);
+      // Only counts as a "question asked" once we actually got a response —
+      // a failed/errored request (server down, network hiccup) shouldn't
+      // bump the streak stat.
+      bumpProblemsCount();
+      if (!currentUser) refreshGuestStatus(); // keep the "X free questions left" count live
+    }
+  } catch (err) {
+    clearTimeout(slowNoteTimer);
+    aiDiv.textContent = 'Something went wrong reaching ThinkStep. Is the server running?';
+    checkConnection();
+  } finally {
+    sendBtn.disabled = false;
+    promptEl.focus();
+  }
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = promptEl.value.trim();
+  if (!text) return;
+  promptEl.value = '';
+  await sendMessage(text);
+});
+
+explainBtn.addEventListener('click', async () => {
+  const active = getActive();
+  if (!active.messages.length) return;
+  await sendMessage("Can you explain that differently, maybe with a simpler example?");
+});
+
+/* ---------- Focus timer (persists across refresh) ---------- */
+const TIMER_KEY = 'thinkstep_timer';
+const DEFAULT_TIMER_SECONDS = 25 * 60;
+
+let timerSeconds = DEFAULT_TIMER_SECONDS;
+let timerRunning = false;
+let timerInterval = null;
+const timerDisplay = document.getElementById('timerDisplay');
+const timerStart = document.getElementById('timerStart');
+const timerReset = document.getElementById('timerReset');
+
+// We save either a paused "secondsLeft" or, while running, an absolute
+// "endsAt" timestamp — that way, even if the page is closed and reopened
+// minutes later, the countdown catches up to the real elapsed time instead
+// of just resuming from wherever it happened to be at the last save.
+function saveTimerState() {
+  const state = timerRunning
+    ? { running: true, endsAt: Date.now() + timerSeconds * 1000 }
+    : { running: false, secondsLeft: timerSeconds };
+  // sessionStorage (not localStorage) on purpose: it survives a page
+  // refresh in the same tab, but is automatically cleared the moment the
+  // tab or browser window is closed — exactly "keep on refresh, reset on close".
+  sessionStorage.setItem(TIMER_KEY, JSON.stringify(state));
+}
+
+function loadTimerState() {
+  try {
+    return JSON.parse(sessionStorage.getItem(TIMER_KEY));
+  } catch { return null; }
+}
+
+function renderTimer() {
+  const m = Math.floor(timerSeconds / 60).toString().padStart(2, '0');
+  const s = (timerSeconds % 60).toString().padStart(2, '0');
+  timerDisplay.textContent = `${m}:${s}`;
+}
+
+function startTicking() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    if (timerSeconds > 0) {
+      timerSeconds--;
+      renderTimer();
+      saveTimerState();
+    } else {
+      clearInterval(timerInterval);
+      timerRunning = false;
+      timerStart.textContent = 'Start';
+      saveTimerState();
+    }
+  }, 1000);
+}
+
+timerStart.addEventListener('click', () => {
+  if (timerRunning) {
+    clearInterval(timerInterval);
+    timerRunning = false;
+    timerStart.textContent = 'Start';
+    saveTimerState();
+  } else {
+    timerRunning = true;
+    timerStart.textContent = 'Pause';
+    saveTimerState();
+    startTicking();
+  }
+});
+timerReset.addEventListener('click', () => {
+  clearInterval(timerInterval);
+  timerRunning = false;
+  timerStart.textContent = 'Start';
+  timerSeconds = DEFAULT_TIMER_SECONDS;
+  renderTimer();
+  saveTimerState();
+});
+
+// Restore whatever state we had before the page was reloaded/reopened.
+(function restoreTimer() {
+  const saved = loadTimerState();
+  if (!saved) { renderTimer(); return; }
+
+  if (saved.running && typeof saved.endsAt === 'number') {
+    const remaining = Math.max(0, Math.round((saved.endsAt - Date.now()) / 1000));
+    timerSeconds = remaining;
+    if (remaining > 0) {
+      timerRunning = true;
+      timerStart.textContent = 'Pause';
+      startTicking();
+    } else {
+      timerRunning = false;
+      timerStart.textContent = 'Start';
+      saveTimerState();
+    }
+  } else if (typeof saved.secondsLeft === 'number') {
+    timerSeconds = saved.secondsLeft;
+  }
+  renderTimer();
+})();
+
+/* ---------- Notes ---------- */
+const notesEl = document.getElementById('notes');
+notesEl.value = localStorage.getItem('thinkstep_notes') || '';
+notesEl.addEventListener('input', () => {
+  localStorage.setItem('thinkstep_notes', notesEl.value);
+});
+
+/* ---------- Mobile / tablet nav toggles ---------- */
+const menuToggle = document.getElementById('menuToggle');
+const toolsToggle = document.getElementById('toolsToggle');
+const overlayEl = document.getElementById('overlay');
+const sidebarLeftEl = document.querySelector('.sidebar-left');
+const sidebarRightEl = document.querySelector('.sidebar-right');
+
+function closeDrawers() {
+  sidebarLeftEl.classList.remove('open');
+  sidebarRightEl.classList.remove('open');
+  overlayEl.classList.remove('show');
+  document.body.classList.remove('drawer-open');
+}
+menuToggle.addEventListener('click', () => {
+  const opening = !sidebarLeftEl.classList.contains('open');
+  closeDrawers();
+  if (opening) {
+    sidebarLeftEl.classList.add('open');
+    overlayEl.classList.add('show');
+    document.body.classList.add('drawer-open');
+  }
+});
+toolsToggle.addEventListener('click', () => {
+  const opening = !sidebarRightEl.classList.contains('open');
+  closeDrawers();
+  if (opening) {
+    sidebarRightEl.classList.add('open');
+    overlayEl.classList.add('show');
+    document.body.classList.add('drawer-open');
+  }
+});
+overlayEl.addEventListener('click', closeDrawers);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawers(); });
+
+/* ---------- Seasonal banner (summer / back-to-school) ---------- */
+// Edit these to match your school's actual calendar.
+const SUMMER_BANNER_MONTH = 6;         // June: congrats on finishing the school year
+const BACK_TO_SCHOOL_BANNER_MONTH = 8; // August: the "back to school" month
+const SCHOOL_START_DAY = 25;           // Day of that month school actually starts (1-31)
+
+function checkSeasonalBanner() {
+  const banner = document.getElementById('seasonalBanner');
+  const textEl = document.getElementById('seasonalBannerText');
+  const closeBtn = document.getElementById('seasonalBannerClose');
+  const now = new Date();
+  const month = now.getMonth() + 1; // JS months are 0-indexed
+  const day = now.getDate();
+  const todayStr = localDateStr(now);
+
+  let type = null;
+  let message = '';
+  if (month === SUMMER_BANNER_MONTH) {
+    type = 'summer';
+    message = "🎉 You made it through another school year — congrats! Enjoy your summer break!";
+  } else if (month === BACK_TO_SCHOOL_BANNER_MONTH) {
+    if (day < SCHOOL_START_DAY) {
+      // Before the actual first day — anticipation, not "welcome back" yet.
+      type = 'backtoschool';
+      message = "😅 Summer's almost over — school starts soon! Time to get ready for a great year.";
+    } else {
+      // On and after the first day of school.
+      type = 'backtoschool';
+      message = "🎒 Welcome back to a new school year! Let's make it a great one.";
+    }
+  }
+
+  if (!type) {
+    banner.classList.remove('show');
+    return;
+  }
+
+  // Once dismissed, stay hidden for the rest of that same day — but it'll
+  // show again on a new day within the same month, so it's not a one-time
+  // thing that vanishes forever after the first visit.
+  const dismissKey = 'thinkstep_seasonal_dismissed_' + todayStr;
+  if (localStorage.getItem(dismissKey)) {
+    banner.classList.remove('show');
+    return;
+  }
+
+  banner.className = type;
+  textEl.textContent = message;
+  banner.classList.add('show');
+
+  closeBtn.onclick = () => {
+    banner.classList.remove('show');
+    localStorage.setItem(dismissKey, '1');
+  };
+}
+
+/* ---------- Presence heartbeat (lets the private admin view show a live
+   "who's online" count — this just pings the server periodically while
+   the tab is open, no personal info beyond what's already tied to the
+   account/guest session) ---------- */
+function sendHeartbeat() {
+  fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
+}
+
+/* ---------- Init ---------- */
+loadModels();
+renderChatList();
+renderMessages();
+renderTimer();
+renderProgress();
+checkConnection();
+checkSeasonalBanner();
+initAccount();
+sendHeartbeat();
+setInterval(checkConnection, 30000);
+setInterval(sendHeartbeat, 25000);
+</script>
+
+</body>
+</html>

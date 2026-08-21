@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Feedback — ThinkStep</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+  :root {
+    --bg: #f4f8ff;
+    --card: #ffffff;
+    --primary: #2f6fed;
+    --primary-dark: #1e4fbf;
+    --primary-light: #eaf1ff;
+    --text: #1b2740;
+    --muted: #6b7c99;
+    --border: #dbe6fb;
+    --shadow-sm: 0 1px 2px rgba(30, 60, 130, 0.06);
+    --shadow-md: 0 4px 16px rgba(30, 60, 130, 0.08);
+    --shadow-lg: 0 12px 32px rgba(30, 60, 130, 0.12);
+    --ease: cubic-bezier(.4,0,.2,1);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  a { color: inherit; }
+
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 32px;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 800;
+    font-size: 21px;
+    color: var(--primary-dark);
+    text-decoration: none;
+  }
+  .brand span.dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-light);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 22px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 14.5px;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    transition: transform .12s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease);
+  }
+  .btn-ghost {
+    background: white;
+    color: var(--primary-dark);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { background: var(--primary-light); }
+
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 60px 20px 80px;
+  }
+  .page-head {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .page-head .eyebrow {
+    display: inline-block;
+    background: var(--primary-light);
+    color: var(--primary-dark);
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 6px 14px;
+    border-radius: 999px;
+    margin-bottom: 16px;
+  }
+  .page-head h1 {
+    font-size: 32px;
+    margin: 0 0 10px;
+    letter-spacing: -0.01em;
+  }
+  .page-head p {
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1.6;
+    margin: 0;
+  }
+
+  .feedback-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 32px 28px;
+    box-shadow: var(--shadow-md);
+  }
+
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .field { margin-bottom: 22px; }
+  input[type="text"], textarea {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    font-size: 15px;
+    font-family: inherit;
+    background: var(--bg);
+    color: var(--text);
+    transition: border-color .15s var(--ease), background .15s var(--ease), box-shadow .15s var(--ease);
+  }
+  input[type="text"]:focus, textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    background: white;
+    box-shadow: 0 0 0 3px var(--primary-light);
+  }
+  textarea {
+    min-height: 130px;
+    resize: vertical;
+    line-height: 1.5;
+  }
+
+  .star-rating {
+    display: flex;
+    gap: 6px;
+  }
+  .star-rating button {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 34px;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--border);
+    transition: transform .1s var(--ease), color .1s var(--ease);
+  }
+  .star-rating button:hover { transform: scale(1.12); }
+  .star-rating button.filled { color: #f5b83d; }
+  .star-hint {
+    margin-top: 6px;
+    font-size: 12.5px;
+    color: var(--muted);
+    min-height: 16px;
+  }
+
+  .submit-btn {
+    width: 100%;
+    padding: 14px;
+    border-radius: 12px;
+    background: var(--primary);
+    color: white;
+    font-size: 15.5px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+    transition: background .15s var(--ease), transform .1s var(--ease);
+  }
+  .submit-btn:hover { background: var(--primary-dark); }
+  .submit-btn:active { transform: translateY(1px); }
+  .submit-btn:disabled { background: #b9c8e6; cursor: not-allowed; }
+
+  .status-msg {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 13.5px;
+    display: none;
+    line-height: 1.5;
+  }
+  .status-msg.show { display: block; }
+  .status-msg.success {
+    background: #eafaf0;
+    color: #1c7a44;
+    border: 1px solid #bfead0;
+  }
+  .status-msg.error {
+    background: #fff0ef;
+    color: #a5321f;
+    border: 1px solid #f3c6c1;
+  }
+
+  .success-state {
+    text-align: center;
+    padding: 20px 0;
+  }
+  .success-state .big-check {
+    font-size: 48px;
+    margin-bottom: 14px;
+  }
+  .success-state h2 {
+    margin: 0 0 8px;
+    font-size: 22px;
+  }
+  .success-state p {
+    color: var(--muted);
+    font-size: 14.5px;
+    margin: 0 0 22px;
+  }
+
+  @media (max-width: 560px) {
+    nav { padding: 14px 16px; }
+    main { padding: 40px 16px 60px; }
+    .feedback-card { padding: 24px 20px; }
+    .star-rating button { font-size: 30px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="brand"><span class="dot"></span>ThinkStep</a>
+  <a href="/app" class="btn btn-ghost">Back to app</a>
+</nav>
+
+<main>
+  <div class="page-head">
+    <div class="eyebrow">💬 We'd love to hear from you</div>
+    <h1>Share your feedback</h1>
+    <p>Tell us what's working, what's not, or what you'd like to see next. Every message goes straight to the person building this.</p>
+  </div>
+
+  <div class="feedback-card" id="feedbackCard">
+    <form id="feedbackForm">
+      <div class="field">
+        <label for="fbName">Your name</label>
+        <input id="fbName" type="text" placeholder="Your name" autocomplete="name" required />
+      </div>
+
+      <div class="field">
+        <label>Rating</label>
+        <div class="star-rating" id="starRating">
+          <button type="button" data-val="1">★</button>
+          <button type="button" data-val="2">★</button>
+          <button type="button" data-val="3">★</button>
+          <button type="button" data-val="4">★</button>
+          <button type="button" data-val="5">★</button>
+        </div>
+        <div class="star-hint" id="starHint">Tap a star to rate</div>
+      </div>
+
+      <div class="field">
+        <label for="fbReview">Your review</label>
+        <textarea id="fbReview" placeholder="What did you like? What could be better?" required></textarea>
+      </div>
+
+      <button type="submit" class="submit-btn" id="fbSubmitBtn">Send Feedback</button>
+      <div class="status-msg" id="fbStatus"></div>
+    </form>
+  </div>
+</main>
+
+<script>
+  const starRating = document.getElementById('starRating');
+  const starButtons = starRating.querySelectorAll('button');
+  const starHint = document.getElementById('starHint');
+  const HINT_TEXT = { 1: 'Not great', 2: 'Could be better', 3: 'Pretty good', 4: 'Great!', 5: 'Amazing!' };
+  let selectedStars = 0;
+
+  function paintStars(val) {
+    starButtons.forEach(b => {
+      b.classList.toggle('filled', parseInt(b.dataset.val, 10) <= val);
+    });
+  }
+
+  starButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedStars = parseInt(btn.dataset.val, 10);
+      paintStars(selectedStars);
+      starHint.textContent = HINT_TEXT[selectedStars] || '';
+    });
+    btn.addEventListener('mouseenter', () => paintStars(parseInt(btn.dataset.val, 10)));
+  });
+  starRating.addEventListener('mouseleave', () => paintStars(selectedStars));
+
+  const form = document.getElementById('feedbackForm');
+  const fbName = document.getElementById('fbName');
+  const fbReview = document.getElementById('fbReview');
+  const fbSubmitBtn = document.getElementById('fbSubmitBtn');
+  const fbStatus = document.getElementById('fbStatus');
+  const feedbackCard = document.getElementById('feedbackCard');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    fbStatus.classList.remove('show', 'success', 'error');
+
+    if (!selectedStars) {
+      fbStatus.textContent = 'Please pick a star rating before sending.';
+      fbStatus.classList.add('show', 'error');
+      return;
+    }
+
+    fbSubmitBtn.disabled = true;
+    fbSubmitBtn.textContent = 'Sending…';
+
+    try {
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: fbName.value.trim(),
+          stars: selectedStars,
+          review: fbReview.value.trim(),
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        fbStatus.textContent = result.error || 'Something went wrong sending your feedback — try again.';
+        fbStatus.classList.add('show', 'error');
+        return;
+      }
+
+      feedbackCard.innerHTML = `
+        <div class="success-state">
+          <div class="big-check">🎉</div>
+          <h2>Thanks for the feedback!</h2>
+          <p>Your review was sent. It really helps make ThinkStep better.</p>
+          <a href="/app" class="btn" style="background:var(--primary); color:white; padding:12px 26px;">Back to ThinkStep</a>
+        </div>
+      `;
+    } catch (err) {
+      fbStatus.textContent = "Couldn't reach the server — is it running?";
+      fbStatus.classList.add('show', 'error');
+    } finally {
+      fbSubmitBtn.disabled = false;
+      fbSubmitBtn.textContent = 'Send Feedback';
+    }
+  });
+</script>
+
+</body>
+</html>

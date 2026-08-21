@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Privacy Policy — ThinkStep</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+  :root {
+    --bg: #f4f8ff;
+    --card: #ffffff;
+    --primary: #2f6fed;
+    --primary-dark: #1e4fbf;
+    --primary-light: #eaf1ff;
+    --text: #1b2740;
+    --muted: #6b7c99;
+    --border: #dbe6fb;
+    --shadow-sm: 0 1px 2px rgba(30, 60, 130, 0.06);
+    --shadow-md: 0 4px 16px rgba(30, 60, 130, 0.08);
+    --ease: cubic-bezier(.4,0,.2,1);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--primary-dark); }
+
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 32px;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 800;
+    font-size: 21px;
+    color: var(--primary-dark);
+    text-decoration: none;
+  }
+  .brand span.dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-light);
+  }
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    padding: 10px 20px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 14px;
+    text-decoration: none;
+    background: white;
+    color: var(--primary-dark);
+    border: 1px solid var(--border);
+    transition: background .15s var(--ease);
+  }
+  .btn-ghost:hover { background: var(--primary-light); }
+
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 50px 24px 80px;
+  }
+  .doc-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 40px 40px;
+    box-shadow: var(--shadow-md);
+  }
+  .doc-card h1 {
+    font-size: 30px;
+    margin: 0 0 6px;
+  }
+  .updated {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 32px;
+  }
+  .doc-card h2 {
+    font-size: 18px;
+    color: var(--primary-dark);
+    margin: 34px 0 10px;
+  }
+  .doc-card h2:first-of-type { margin-top: 0; }
+  .doc-card p, .doc-card li {
+    font-size: 14.5px;
+    line-height: 1.75;
+    color: var(--text);
+  }
+  .doc-card ul { padding-left: 20px; margin: 10px 0; }
+  .doc-card li { margin-bottom: 6px; }
+  .callout {
+    background: var(--primary-light);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin: 18px 0;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .callout strong { color: var(--primary-dark); }
+  .contact-box {
+    margin-top: 36px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 14.5px;
+    color: var(--muted);
+  }
+  .contact-box a { font-weight: 700; }
+
+  @media (max-width: 560px) {
+    nav { padding: 14px 16px; }
+    main { padding: 30px 14px 60px; }
+    .doc-card { padding: 26px 22px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="brand"><span class="dot"></span>ThinkStep</a>
+  <a href="/app" class="btn-ghost">Back to app</a>
+</nav>
+
+<main>
+  <div class="doc-card">
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: August 2026</p>
+
+    <div class="callout">
+      <strong>In plain language:</strong> ThinkStep collects the smallest amount of
+      information it can — a name, a grade level, and a password. We don't sell
+      data, we don't show ads, and if you're a parent, you can ask us to see or
+      delete your child's information at any time by emailing us below.
+    </div>
+
+    <h2>Who runs ThinkStep</h2>
+    <p>
+      ThinkStep is a small, independently-run tutoring app. This policy explains
+      what information it collects from users — including children — and how that
+      information is used, stored, and protected.
+    </p>
+
+    <h2>Information we collect</h2>
+    <p>When you use ThinkStep, we may collect:</p>
+    <ul>
+      <li><strong>Account info (if you sign up):</strong> a name, a grade level (1–12), and a password (stored as a secure hash — we never see or store your actual password).</li>
+      <li><strong>Chat messages:</strong> what you type to the AI tutor, so it can respond to you. Chat history is used to keep the conversation working and is not sold or shared with advertisers. As a safety measure, if a message contains language that may indicate someone is in danger (for example, mentions of self-harm or being hurt by someone), that message is automatically logged so the app's operator can check in — see "Your safety" below.</li>
+      <li><strong>Guest usage:</strong> if you don't create an account, we store an anonymous random ID in a cookie on your device to track how many free questions you've used — this is not linked to your name or any personal information.</li>
+      <li><strong>Feedback you submit:</strong> if you use the Feedback page, we collect the name, rating, and review you choose to provide.</li>
+      <li><strong>Parental consent info:</strong> if a user indicates they are under 13, we collect a parent or guardian's email address to request consent before the account can be used, as required by law.</li>
+    </ul>
+
+    <h2>What we don't do</h2>
+    <ul>
+      <li>We do not sell or rent personal information to anyone.</li>
+      <li>We do not show ads or use data for advertising.</li>
+      <li>We do not collect more information than is reasonably necessary to run the app.</li>
+      <li>We do not knowingly allow a child under 13 to create or use an account without a parent or guardian's verified consent.</li>
+    </ul>
+
+    <h2>Children's privacy (COPPA)</h2>
+    <p>
+      ThinkStep is built with kids in mind, and we take children's privacy seriously.
+      If a user tells us they are under 13, we require a parent or guardian's email
+      address before their account is created, and we send that parent a consent
+      request. The account cannot be used to chat with the AI tutor until that
+      consent is confirmed.
+    </p>
+    <p>
+      Parents and guardians have the right at any time to:
+    </p>
+    <ul>
+      <li>Review the personal information we have collected about their child</li>
+      <li>Request that we delete their child's account and associated information</li>
+      <li>Refuse to allow further collection or use of their child's information, and revoke previously given consent</li>
+    </ul>
+    <p>
+      To do any of this, a parent or guardian can email us at the address below —
+      we will respond and act on the request as quickly as we reasonably can.
+    </p>
+
+    <h2>Your safety</h2>
+    <p>
+      ThinkStep's AI tutor is instructed to gently redirect a kid to a trusted
+      adult if they mention being unsafe, hurt, or thinking about harming
+      themselves or someone else. On top of that, an automated keyword check
+      looks for language like this and, if it finds a possible match, logs
+      the message and notifies the app's operator directly so a real person
+      can follow up. This check is simple and imperfect on purpose — it's
+      meant to catch too much rather than too little.
+    </p>
+
+    <h2>How information is stored</h2>
+    <p>
+      Passwords are never stored in plain text — only a secure, one-way hash.
+      Account and chat data is stored to operate the app and is not shared with
+      third parties except services strictly necessary to run ThinkStep (for
+      example, a payment processor if you subscribe, which never receives your
+      chat content).
+    </p>
+
+    <h2>Changes to this policy</h2>
+    <p>
+      If this policy changes in a meaningful way, we'll update the date at the top
+      of this page. Continued use of ThinkStep after a change means you accept the
+      updated policy.
+    </p>
+
+    <div class="contact-box">
+      Questions, or a parent/guardian request about a child's data?
+      Email <a href="mailto:ThinkStepv1.0@gmail.com">ThinkStepv1.0@gmail.com</a>.
+      <br>See also our <a href="/terms">Terms of Service</a>.
+    </div>
+  </div>
+</main>
+
+</body>
+</html>
