@@ -1610,6 +1610,71 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+/* ---------- Math tidy-up ----------
+   The AI is told (in the system prompt) to write math plainly, but models
+   still slip into LaTeX sometimes — "\frac{3}{4}" or "$x^2$". Messages are
+   shown as plain text, so that would appear literally as gibberish to a
+   kid. This converts the common cases into something readable. It's a
+   safety net, not the main fix. */
+const SUPERSCRIPT = {
+  '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴',
+  '5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','n':'ⁿ'
+};
+const MATH_SYMBOLS = [
+  [/\\times\b/g, '×'], [/\\div\b/g, '÷'], [/\\cdot\b/g, '·'],
+  [/\\pm\b/g, '±'], [/\\leq?\b/g, '≤'], [/\\geq?\b/g, '≥'],
+  [/\\neq?\b/g, '≠'], [/\\approx\b/g, '≈'], [/\\infty\b/g, '∞'],
+  [/\\pi\b/g, 'π'], [/\\theta\b/g, 'θ'], [/\\alpha\b/g, 'α'],
+  [/\\beta\b/g, 'β'], [/\\degree\b/g, '°'], [/\^?\\circ\b/g, '°'],
+  [/\\Rightarrow\b/g, '⇒'], [/\\rightarrow\b/g, '→'], [/\\to\b/g, '→'],
+  [/\\angle\b/g, '∠'], [/\\triangle\b/g, '△'], [/\\%/g, '%'],
+];
+
+function tidyMath(s) {
+  if (!s || !/[\\${}^]|\*\*/.test(s)) {
+    return s; // fast path — nothing math-y or markdown-y in here
+  }
+  let t = s;
+
+  // Strip math delimiters FIRST, while the LaTeX inside is still
+  // recognisable. $$...$$ is always math; $...$ only counts when it really
+  // looks like math, so money in word problems ("$5 each") is left alone.
+  t = t.replace(/\$\$([\s\S]+?)\$\$/g, '$1');
+  t = t.replace(/\$([^$\n]*[\\^_{}][^$\n]*)\$/g, '$1');
+
+  // \text{...} / \mathrm{...} wrappers — keep just the words inside
+  t = t.replace(/\\(?:text|mathrm|mathbf|mbox|operatorname)\s*\{([^{}]*)\}/g, '$1');
+
+  // \frac{3}{4} -> 3/4  (parenthesise only when the part isn't a simple number)
+  const wrapPart = x => {
+    x = x.trim();
+    return /^[A-Za-z0-9.]+$/.test(x) ? x : '(' + x + ')';
+  };
+  for (let i = 0; i < 3; i++) { // repeat for lightly nested fractions
+    t = t.replace(/\\[dt]?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g,
+                  (m, a, b) => wrapPart(a) + '/' + wrapPart(b));
+  }
+  t = t.replace(/\\sqrt\s*\{([^{}]+)\}/g, (m, a) => 'sqrt(' + a.trim() + ')');
+
+  for (const [re, rep] of MATH_SYMBOLS) t = t.replace(re, rep);
+
+  // \( \) \[ \] delimiters, \left( \right), and spacing commands
+  t = t.replace(/\\left|\\right/g, '');
+  t = t.replace(/\\[()[\]]/g, '');
+  t = t.replace(/\\[,;!:]/g, ' ');
+  t = t.replace(/\\\\/g, '\n');
+
+  // x^2 / x^{2} -> x²  (only when every character has a superscript form)
+  t = t.replace(/\^\{?([0-9+\-n]{1,3})\}?/g, (m, g) =>
+    [...g].every(c => SUPERSCRIPT[c]) ? [...g].map(c => SUPERSCRIPT[c]).join('') : m);
+
+  // leftover markdown emphasis, which would otherwise show as literal *
+  t = t.replace(/\*\*([^*]+)\*\*/g, '$1');
+  t = t.replace(/__([^_]+)__/g, '$1');
+
+  return t;
+}
+
 function renderMessages() {
   const active = getActive();
   chat.innerHTML = '';
@@ -1625,7 +1690,9 @@ function addMessage(role, text) {
   if (empty) empty.remove();
   const div = document.createElement('div');
   div.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
-  div.textContent = text;
+  // Only the AI's replies need math tidying — whatever the student typed
+  // should always be shown back to them exactly as they wrote it.
+  div.textContent = role === 'user' ? text : tidyMath(text);
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
   return div;
@@ -1882,7 +1949,7 @@ async function sendMessage(text) {
       if (!clean) continue; // pure heartbeat chunk — keep showing the typing dots
       full += clean;
       clearTimeout(slowNoteTimer);
-      aiDiv.textContent = full;
+      aiDiv.textContent = tidyMath(full);
       chat.scrollTop = chat.scrollHeight;
     }
     clearTimeout(slowNoteTimer);
