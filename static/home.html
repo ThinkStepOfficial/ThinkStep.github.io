@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- Proves to Google Search Console that this site is ours. Safe to be
+     public (it's on every verified site), but don't delete it — removing
+     it un-verifies the site. -->
+<meta name="google-site-verification" content="8lFMS5BWAdGNmQzrO0FuhShOilTAwzkJ_gmz0HO_C30" />
+<title>ThinkStep — Learn, don't just get answers</title>
+<meta name="description" content="ThinkStep is a gentle AI tutor for kids that guides with hints and questions instead of giving answers away. Free to try, no ads, no data selling.">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ThinkStep — Learn, don't just get answers">
+<meta property="og:description" content="A gentle AI tutor for kids that guides with hints and questions instead of giving answers away. Free to try, no ads, no data selling.">
+<meta property="og:image" content="/static/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ThinkStep — Learn, don't just get answers">
+<meta name="twitter:description" content="A gentle AI tutor for kids that guides with hints and questions instead of giving answers away.">
+<meta name="twitter:image" content="/static/og-image.png">
+<style>
+  :root {
+    --bg: #f4f8ff;
+    --card: #ffffff;
+    --primary: #2f6fed;
+    --primary-dark: #1e4fbf;
+    --primary-light: #eaf1ff;
+    --accent: #7fb2ff;
+    --text: #1b2740;
+    --muted: #6b7c99;
+    --border: #dbe6fb;
+    --shadow-sm: 0 1px 2px rgba(30, 60, 130, 0.06);
+    --shadow-md: 0 4px 16px rgba(30, 60, 130, 0.08);
+    --shadow-lg: 0 12px 32px rgba(30, 60, 130, 0.12);
+    --ease: cubic-bezier(.4,0,.2,1);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+
+  /* NAV */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 32px;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 800;
+    font-size: 21px;
+    color: var(--primary-dark);
+    text-decoration: none;
+  }
+  .brand span.dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-light);
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+  .nav-links a.nav-link {
+    text-decoration: none;
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 14.5px;
+    transition: color .15s var(--ease);
+  }
+  .nav-links a.nav-link:hover { color: var(--primary-dark); }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 15px;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    transition: transform .12s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease);
+  }
+  .btn-primary {
+    background: var(--primary);
+    color: white;
+    box-shadow: var(--shadow-md);
+  }
+  .btn-primary:hover { background: var(--primary-dark); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+  .btn-ghost {
+    background: white;
+    color: var(--primary-dark);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { background: var(--primary-light); }
+
+  /* HERO */
+  .hero {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 90px 24px 60px;
+    text-align: center;
+  }
+  .hero .eyebrow {
+    display: inline-block;
+    background: var(--primary-light);
+    color: var(--primary-dark);
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 6px 14px;
+    border-radius: 999px;
+    margin-bottom: 22px;
+    letter-spacing: .02em;
+  }
+  .hero h1 {
+    font-size: 46px;
+    line-height: 1.15;
+    margin: 0 0 18px;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+  .hero h1 .accent { color: var(--primary); }
+  .hero p.sub {
+    font-size: 18px;
+    color: var(--muted);
+    max-width: 600px;
+    margin: 0 auto 34px;
+    line-height: 1.6;
+  }
+  .hero-ctas {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  /* START LEARNING BOX */
+  .start-box {
+    max-width: 640px;
+    margin: 56px auto 0;
+    background: linear-gradient(160deg, var(--primary), var(--primary-dark));
+    border-radius: 24px;
+    padding: 40px 36px;
+    color: white;
+    box-shadow: var(--shadow-lg);
+    text-align: center;
+  }
+  .start-box h2 {
+    margin: 0 0 8px;
+    font-size: 26px;
+  }
+  .start-box p {
+    margin: 0 0 26px;
+    color: rgba(255,255,255,0.85);
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .start-box .btn-primary {
+    background: white;
+    color: var(--primary-dark);
+    padding: 15px 34px;
+    font-size: 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  }
+  .start-box .btn-primary:hover { background: #f0f6ff; transform: translateY(-2px) scale(1.02); }
+  .start-box .fine-print {
+    margin-top: 18px;
+    font-size: 12.5px;
+    color: rgba(255,255,255,0.7);
+  }
+
+  /* SECTIONS */
+  section { padding: 70px 24px; }
+  .section-inner { max-width: 1080px; margin: 0 auto; }
+  .section-title {
+    text-align: center;
+    font-size: 30px;
+    margin: 0 0 10px;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .section-sub {
+    text-align: center;
+    color: var(--muted);
+    font-size: 15.5px;
+    max-width: 560px;
+    margin: 0 auto 46px;
+    line-height: 1.6;
+  }
+
+  /* FEATURES GRID */
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+  .feature-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 26px 22px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow .2s var(--ease), transform .2s var(--ease);
+  }
+  .feature-card:hover { box-shadow: var(--shadow-md); transform: translateY(-3px); }
+  .feature-card .icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+    background: var(--primary-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    margin-bottom: 16px;
+  }
+  .feature-card h3 {
+    margin: 0 0 8px;
+    font-size: 16.5px;
+    color: var(--text);
+  }
+  .feature-card p {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* ABOUT */
+  .about {
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .about-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 50px;
+    align-items: center;
+  }
+  .about-text h2 { font-size: 28px; margin: 0 0 16px; }
+  .about-text p { color: var(--muted); font-size: 15px; line-height: 1.75; margin: 0 0 14px; }
+  .about-text p:last-child { margin-bottom: 0; }
+  .about-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 26px;
+  }
+  .about-card ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .about-card li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px dashed var(--border);
+    font-size: 14px;
+    color: var(--text);
+  }
+  .about-card li:last-child { border-bottom: none; }
+  .about-card li .check {
+    color: var(--primary);
+    font-weight: 800;
+    flex-shrink: 0;
+  }
+
+  /* FOOTER CTA */
+  .footer-cta {
+    text-align: center;
+    padding: 70px 24px 90px;
+  }
+  .footer-cta h2 { font-size: 28px; margin: 0 0 10px; }
+  .footer-cta p { color: var(--muted); margin: 0 0 28px; }
+
+  /* FEEDBACK CTA */
+  .feedback-cta-section { padding: 0 24px 70px; }
+  .feedback-cta-box {
+    max-width: 900px;
+    margin: 0 auto;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    padding: 34px 40px;
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    box-shadow: var(--shadow-md);
+  }
+  .feedback-cta-icon {
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+    border-radius: 16px;
+    background: var(--primary-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+  }
+  .feedback-cta-text { flex: 1; }
+  .feedback-cta-text h2 { margin: 0 0 6px; font-size: 20px; }
+  .feedback-cta-text p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+  .feedback-cta-box .btn-primary { flex-shrink: 0; white-space: nowrap; }
+
+  @media (max-width: 700px) {
+    .feedback-cta-box { flex-direction: column; text-align: center; padding: 28px 24px; }
+  }
+
+  footer {
+    text-align: center;
+    padding: 28px 24px;
+    color: var(--muted);
+    font-size: 12.5px;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 860px) {
+    .features-grid { grid-template-columns: 1fr 1fr; }
+    .about-grid { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 34px; }
+  }
+  @media (max-width: 560px) {
+    nav { padding: 14px 16px; }
+    .nav-links { gap: 14px; }
+    .nav-links a.nav-link { display: none; }
+    .hero { padding: 56px 18px 40px; }
+    .hero h1 { font-size: 28px; }
+    .hero p.sub { font-size: 15.5px; }
+    .features-grid { grid-template-columns: 1fr; }
+    section { padding: 46px 18px; }
+    .start-box { padding: 30px 22px; margin-top: 40px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="brand"><span class="dot"></span>ThinkStep</a>
+  <div class="nav-links">
+    <a href="#features" class="nav-link">Features</a>
+    <a href="#about" class="nav-link">About Us</a>
+    <a href="/feedback" class="nav-link">Feedback</a>
+    <a href="/app" class="btn btn-primary">Start Learning</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="eyebrow">🧠 Learn it, don't just get told it</div>
+  <h1>Learn it. Don't just <span class="accent">get the answer.</span></h1>
+  <p class="sub">
+    ThinkStep is a gentle AI tutor that guides kids through problems with hints and
+    friendly questions — never just handing over the answer. Built to help you actually
+    understand, one small step at a time.
+  </p>
+  <div class="hero-ctas">
+    <a href="/app" class="btn btn-primary">🚀 Start Learning</a>
+    <a href="#about" class="btn btn-ghost">Learn more</a>
+  </div>
+
+  <div class="start-box">
+    <h2>Ready when you are 🌱</h2>
+    <p>Jump straight into a chat. Pick your grade, choose a friendly AI model,
+       and start working through your homework together.</p>
+    <a href="/app" class="btn btn-primary">Start Learning →</a>
+    <div class="fine-print">Try it free — sign up only if you want unlimited access.</div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="section-inner">
+    <h2 class="section-title">Everything a curious kid needs</h2>
+    <p class="section-sub">A few small tools built around one idea: understanding beats speed.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="icon">🧠</div>
+        <h3>Guides, doesn't answer</h3>
+        <p>ThinkStep hints and asks questions instead of giving the answer away — so the "aha!" moment is yours.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📐</div>
+        <h3>Grade-based formulas</h3>
+        <p>Set your grade (1–12) and get a formula sheet and explanations pitched right at your level.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🎤</div>
+        <h3>Talk instead of type</h3>
+        <p>Use your voice to ask questions when typing is slow — great for younger learners.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">⏱</div>
+        <h3>Focus timer & notes</h3>
+        <p>A built-in Pomodoro timer and quick scratchpad to stay focused during homework time.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🔥</div>
+        <h3>Streaks & progress</h3>
+        <p>A daily streak and question counter to gently celebrate showing up and trying.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🔒</div>
+        <h3>Safe & kid-friendly</h3>
+        <p>Built-in safety rules keep every conversation age-appropriate, with no ads and no data sold.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="about" id="about">
+  <div class="section-inner about-grid">
+    <div class="about-text">
+      <h2>About ThinkStep</h2>
+      <p>
+        ThinkStep started with a simple frustration: most AI tools just hand kids the
+        answer, which feels helpful in the moment but doesn't actually teach anything.
+      </p>
+      <p>
+        So this was built the other way around — an AI tutor that acts like a patient
+        teacher sitting next to you, nudging you toward the answer with small hints
+        and encouraging questions, instead of doing the thinking for you.
+      </p>
+      <p>
+        It's a personal project built around one idea — no data collection,
+        no ads. Just a quiet, gentle space to actually learn.
+      </p>
+    </div>
+    <div class="about-card">
+      <ul>
+        <li><span class="check">✓</span> Never gives the final answer right away</li>
+        <li><span class="check">✓</span> Simple, age-appropriate explanations</li>
+        <li><span class="check">✓</span> Adjusts to grade level and difficulty</li>
+        <li><span class="check">✓</span> Built-in safety rules for kids</li>
+        <li><span class="check">✓</span> No ads, no data selling</li>
+        <li><span class="check">✓</span> Free to try, no account required to start</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="footer-cta">
+  <h2>Ready to figure something out?</h2>
+  <p>Open ThinkStep and start working through a problem together.</p>
+  <a href="/app" class="btn btn-primary">🚀 Start Learning</a>
+</section>
+
+<section class="feedback-cta-section">
+  <div class="section-inner">
+    <div class="feedback-cta-box">
+      <div class="feedback-cta-icon">⭐</div>
+      <div class="feedback-cta-text">
+        <h2>Got thoughts on ThinkStep?</h2>
+        <p>Whether it's something you loved, something confusing, or an idea for what's next — we actually read every single piece of feedback.</p>
+      </div>
+      <a href="/feedback" class="btn btn-primary">💬 Leave Feedback</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  ThinkStep — a gentle AI tutor that helps you learn, one step at a time.
+  <br><a href="/privacy" style="color:inherit; text-decoration:underline;">Privacy Policy</a>
+  &middot; <a href="/terms" style="color:inherit; text-decoration:underline;">Terms of Service</a>
+  &middot; <a href="/feedback" style="color:inherit; text-decoration:underline;">Feedback</a>
+</footer>
+
+</body>
+</html>
