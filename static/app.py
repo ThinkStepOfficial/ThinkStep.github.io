@@ -13,11 +13,9 @@ return a friendly error instead of an AI response.
 
 It also has a small account system:
 - Accounts are just a name, grade (1-12), and password — no email needed.
+- Everyone uses the same tutor model (openai/gpt-oss-120b, the smartest).
 - Guests (no account) get 20 free questions total, then have to sign up.
-- The smartest model (openai/gpt-oss-120b) always requires an account,
-  regardless of guest quota.
-- Logged-in accounts get unlimited general usage, with that smartest model
-  still capped at 20 uses per day per account.
+- Logged-in accounts have no question limit.
 - An optional "keep me signed in" checkbox makes the login persist for 30
   days; otherwise it's cleared when the browser closes.
 """
@@ -241,10 +239,12 @@ GROQ_CONFIG_FILE = os.path.join(BASE_DIR, "groq_config.json")
 # their flagship/smartest model (better reasoning, still very fast at
 # ~500 tokens/sec). Both are genuinely good — not scaled-down "lite"
 # versions — this is simply the best free lineup Groq has right now.
-ALLOWED_MODELS = [
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-]
+# ThinkStep uses ONE tutor model: gpt-oss-120b, Groq's smartest free model.
+# There's no picker and no daily limit for accounts. gpt-oss-20b is still
+# used behind the scenes, but only as a stand-in when 120b is busy (see
+# RATE_LIMIT_FALLBACK) and by the off-task gate.
+TUTOR_MODEL = "openai/gpt-oss-120b"
+ALLOWED_MODELS = [TUTOR_MODEL]
 
 # ---- How hard the tutor thinks ----
 # Both models "think" privately before answering, and Groq lets us choose
@@ -267,10 +267,11 @@ TUTOR_ATTEMPTS = [
     {"reasoning_effort": "high", "max_completion_tokens": 4096, "include_reasoning": False},
     {},
 ]
-# If the smartest model is busy (the free plan allows a limited number of
-# tokens per minute per model), fall back to the other model rather than
-# showing an error. Only ever a downgrade — a guest can never end up on the
-# account-only model this way.
+# If the tutor model is busy or out of today's free allowance (Groq's free
+# plan limits tokens per minute and per day, separately for each model),
+# the quicker model answers instead of the student seeing an error. It has
+# its own separate allowance, so this roughly doubles how many questions
+# ThinkStep can answer per day for free.
 RATE_LIMIT_FALLBACK = {"openai/gpt-oss-120b": "openai/gpt-oss-20b"}
 
 
@@ -726,70 +727,6 @@ def attach_guest_cookie_if_new(resp, guest_id, is_new):
 
 
 # ============================================================
-# Daily usage limit for gpt-oss-120b — it's the smartest but priciest
-# of the two models, so even logged-in accounts are capped at 20 uses
-# of it per day (resets at midnight). This is scoped PER ACCOUNT
-# (keyed by account name), not shared globally between users.
-# ============================================================
-LIMITED_MODEL = "openai/gpt-oss-120b"
-LIMITED_MODEL_DAILY_CAP = 20
-USAGE_FILE = os.path.join(BASE_DIR, "usage_state.json")
-_usage_lock = threading.Lock()
-
-
-def _load_usage():
-    data = STORE.read("usage_state.json", {}) or {}
-    today = date.today().isoformat()
-    if data.get("date") != today:
-        data = {"date": today, "users": {}}
-    if "users" not in data:
-        data["users"] = {}
-    return data
-
-
-def _save_usage(data):
-    STORE.write("usage_state.json", data)
-
-
-def has_quota(model, account_key):
-    """Read-only check: does today's cap still have room for this model,
-    for this account? Does NOT use up any quota — call record_usage() for
-    that, and only after the request to Groq actually succeeds. This
-    split matters: if we charged the quota up front, a timed-out or failed
-    request would burn one of the account's 20 daily uses for nothing."""
-    if model != LIMITED_MODEL:
-        return True
-    with _usage_lock:
-        data = _load_usage()
-        _save_usage(data)  # persist in case the date just rolled over
-        return data["users"].get(account_key, 0) < LIMITED_MODEL_DAILY_CAP
-
-
-def record_usage(model, account_key):
-    """Actually uses up one unit of quota. Only call this after a request
-    has genuinely succeeded."""
-    if model != LIMITED_MODEL:
-        return None
-    with _usage_lock:
-        data = _load_usage()
-        data["users"][account_key] = data["users"].get(account_key, 0) + 1
-        _save_usage(data)
-        return LIMITED_MODEL_DAILY_CAP - data["users"][account_key]
-
-
-def get_usage_snapshot(account_key):
-    with _usage_lock:
-        data = _load_usage()
-    used = data.get("users", {}).get(account_key, 0)
-    return {
-        "model": LIMITED_MODEL,
-        "used": used,
-        "limit": LIMITED_MODEL_DAILY_CAP,
-        "remaining": max(0, LIMITED_MODEL_DAILY_CAP - used),
-    }
-
-
-# ============================================================
 # Feedback — a simple star-rating + review form that emails
 # whoever runs this app. Every submission is also appended to a
 # local feedback.json as a backup, so nothing is lost even if
@@ -885,7 +822,6 @@ BACKUP_FILES = [
     "users.json",
     "feedback.json",
     "guest_usage.json",
-    "usage_state.json",
     "consent_tokens.json",
     "reset_tokens.json",
     "safety_flags.json",
@@ -2048,12 +1984,6 @@ def guest_status():
     return attach_guest_cookie_if_new(resp, guest_id, is_new)
 
 
-@app.route("/api/usage")
-def usage():
-    user = get_current_user()
-    if not user:
-        return jsonify({"model": LIMITED_MODEL, "requiresAccount": True, "limit": LIMITED_MODEL_DAILY_CAP})
-    return jsonify(get_usage_snapshot(session.get("user_key")))
 
 
 # ============================================================
@@ -2062,9 +1992,10 @@ def usage():
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json(force=True)
-    model = data.get("model", ALLOWED_MODELS[0])
-    if model not in ALLOWED_MODELS:
-        model = ALLOWED_MODELS[0]
+    # One tutor model for everyone. Whatever the page asks for is ignored —
+    # that way an old copy of the page still cached in someone's browser
+    # (which may ask for the retired quicker model) still gets the smart one.
+    model = TUTOR_MODEL
 
     user = get_current_user()
     guest_id, guest_id_is_new = (None, False) if user else get_or_create_guest_id()
@@ -2074,20 +2005,8 @@ def chat():
             return attach_guest_cookie_if_new(resp, guest_id, guest_id_is_new)
         return resp
 
-    # The smartest model always requires an account, no exceptions for
-    # guests even if they haven't used up their free questions yet.
-    if model == LIMITED_MODEL and not user:
-        def generate_needs_account():
-            yield (
-                f"✨ {LIMITED_MODEL} is our most powerful model, so it's only available "
-                f"with a free ThinkStep account. Click \"Sign Up\" in the sidebar — it "
-                f"just takes a name, grade, and password — and then you can use it!"
-            )
-        print(f"[ThinkStep] Guest tried {LIMITED_MODEL} — blocked, account required.")
-        return with_guest_cookie(Response(generate_needs_account(), mimetype="text/plain"))
-
-    # Guests get a lifetime total of GUEST_QUESTION_LIMIT questions across
-    # any model before they need to make an account.
+    # Guests get a lifetime total of GUEST_QUESTION_LIMIT questions before
+    # they need to make a free account. Accounts have no question limit.
     if not user:
         used = guest_questions_used(guest_id)
         if used >= GUEST_QUESTION_LIMIT:
@@ -2100,18 +2019,7 @@ def chat():
             print(f"[ThinkStep] Guest {guest_id} hit the {GUEST_QUESTION_LIMIT}-question limit — blocked.")
             return with_guest_cookie(Response(generate_guest_limit(), mimetype="text/plain"))
 
-    # For logged-in accounts, the smartest model still has its own daily cap.
     account_key = session.get("user_key") if user else None
-    if user and not has_quota(model, account_key):
-        def generate_limit_reached():
-            yield (
-                f"You've used {LIMITED_MODEL} {LIMITED_MODEL_DAILY_CAP} times today — "
-                f"that's today's limit for this one! It resets at midnight. In the "
-                f"meantime, try picking a different model from the dropdown up top — "
-                f"they all still work great. 🙂"
-            )
-        print(f"[ThinkStep] Daily limit reached for {LIMITED_MODEL} on account {account_key} — request blocked.")
-        return Response(generate_limit_reached(), mimetype="text/plain")
 
     print(f"[ThinkStep] Sending this request to Groq using model: {model} "
           f"(user: {account_key or 'guest ' + str(guest_id)})")
@@ -2353,22 +2261,12 @@ def chat():
 
         succeeded = result["succeeded"]
 
-        # Only spend usage (guest question, or account's daily smartest-model
-        # quota) if this request genuinely got a response — a timeout,
-        # connection error, or crash shouldn't cost the student anything.
-        if succeeded:
-            if user:
-                # charge for the model that actually answered — if the
-                # smartest model was busy and the other one stepped in, that
-                # shouldn't use up one of today's smartest-model questions
-                remaining = record_usage(result.get("model_used", model), account_key)
-                if remaining is not None:
-                    print(f"[ThinkStep] {LIMITED_MODEL} usage today for {account_key}: {LIMITED_MODEL_DAILY_CAP - remaining}/{LIMITED_MODEL_DAILY_CAP} ({remaining} left)")
-            else:
-                record_guest_usage(guest_id)
-                print(f"[ThinkStep] Guest {guest_id} usage: {guest_questions_used(guest_id)}/{GUEST_QUESTION_LIMIT}")
-        elif model == LIMITED_MODEL:
-            print(f"[ThinkStep] {LIMITED_MODEL} request failed — usage NOT charged.")
+        # Only count a guest's free question if it genuinely got a response —
+        # a timeout, connection error, or crash shouldn't cost them anything.
+        # (Accounts have no question limit, so there's nothing to count.)
+        if succeeded and not user:
+            record_guest_usage(guest_id)
+            print(f"[ThinkStep] Guest {guest_id} usage: {guest_questions_used(guest_id)}/{GUEST_QUESTION_LIMIT}")
 
     return with_guest_cookie(Response(generate(), mimetype="text/plain"))
 
