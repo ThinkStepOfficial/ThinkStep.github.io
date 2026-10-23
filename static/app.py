@@ -1307,6 +1307,67 @@ def home():
     return send_from_directory("static", "home.html")
 
 
+# ============================================================
+# Search engines
+# robots.txt and sitemap.xml are the first two things Google and Bing
+# look for on a new site: robots.txt says what they may crawl, and the
+# sitemap lists the pages worth indexing. Both are built from the address
+# the request came in on, so they stay correct if the site ever moves to
+# a new domain.
+# ============================================================
+PUBLIC_PAGES = [
+    # (path, how often it changes, priority 0.0–1.0)
+    ("/", "weekly", "1.0"),
+    ("/app", "weekly", "0.9"),
+    ("/feedback", "monthly", "0.4"),
+    ("/privacy", "yearly", "0.3"),
+    ("/terms", "yearly", "0.3"),
+]
+
+
+def _site_root():
+    # Render terminates HTTPS before the request reaches Flask, so the
+    # request itself looks like plain http — always advertise https.
+    return "https://" + request.host
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        # nothing useful for search results in here, and the admin page
+        # should never show up in anyone's search results
+        "Disallow: /api/\n"
+        "Disallow: /admin\n"
+        f"\nSitemap: {_site_root()}/sitemap.xml\n"
+    )
+    return Response(body, mimetype="text/plain")
+
+
+@app.route("/sitemap.xml")
+def sitemap_xml():
+    root = _site_root()
+    urls = "".join(
+        f"  <url><loc>{root}{path}</loc><changefreq>{freq}</changefreq>"
+        f"<priority>{prio}</priority></url>\n"
+        for path, freq, prio in PUBLIC_PAGES
+    )
+    body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            f"{urls}</urlset>\n")
+    return Response(body, mimetype="application/xml")
+
+
+@app.route("/ping")
+def ping():
+    """For a free uptime monitor to hit every few minutes so Render's free
+    plan doesn't put the site to sleep — a sleeping site takes ~1 minute to
+    wake, and Google may give up on it. Deliberately touches nothing (no
+    database, no AI), so it doesn't wake the database or use any quota."""
+    return Response("ok", mimetype="text/plain")
+
+
 @app.route("/app")
 def app_page():
     return send_from_directory("static", "index.html")
