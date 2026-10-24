@@ -87,81 +87,6 @@
     align-items: center;
     gap: 8px;
   }
-  .model-picker label {
-    font-size: 13px;
-    color: var(--muted);
-    font-weight: 600;
-  }
-  select#model {
-    padding: 8px 34px 8px 12px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: var(--card) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6"><path d="M0 0l5 6 5-6z" fill="%232f6fed"/></svg>') no-repeat right 12px center;
-    appearance: none;
-    -webkit-appearance: none;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--primary-dark);
-    cursor: pointer;
-    transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
-  }
-  select#model:hover { border-color: var(--accent); }
-  select#model:focus { outline: none; box-shadow: 0 0 0 3px var(--primary-light); border-color: var(--primary); }
-
-  .model-select-wrap {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  #modelInfoBtn {
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid var(--border);
-    background: white;
-    color: var(--primary);
-    font-size: 14px;
-    font-weight: 700;
-    line-height: 1;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: background .12s var(--ease), border-color .12s var(--ease);
-  }
-  #modelInfoBtn:hover { background: var(--primary-light); border-color: var(--accent); }
-  .model-popover {
-    display: none;
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    width: 260px;
-    background: white;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: var(--shadow-md);
-    padding: 12px 14px;
-    font-size: 12.5px;
-    line-height: 1.5;
-    color: var(--text);
-    z-index: 50;
-  }
-  .model-popover.open { display: block; animation: msgIn .15s var(--ease); }
-  .model-popover .mp-name {
-    font-weight: 700;
-    color: var(--primary-dark);
-    font-size: 13px;
-    margin-bottom: 4px;
-  }
-  .model-popover .mp-usage {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px dashed var(--border);
-    font-size: 11.5px;
-    font-weight: 600;
-    color: var(--primary-dark);
-  }
-  .model-popover .mp-usage.low { color: #b3540c; }
 
   /* CONNECTION BANNER */
   #connBanner {
@@ -868,8 +793,6 @@
     .brand span.dot { width: 9px; height: 9px; box-shadow: 0 0 0 3px var(--primary-light); }
     .tagline { display: none; }
     .model-picker { gap: 6px; }
-    .model-picker label { display: none; }
-    select#model { font-size: 13px; padding: 9px 28px 9px 10px; max-width: 34vw; min-height: 40px; }
 
     .nav-toggle { min-width: 42px; min-height: 42px; font-size: 19px; }
 
@@ -919,12 +842,6 @@
       </div>
     </div>
     <div class="model-picker">
-      <label for="model">Model</label>
-      <div class="model-select-wrap">
-        <select id="model"></select>
-        <button type="button" id="modelInfoBtn" title="What is this model?">ⓘ</button>
-        <div id="modelPopover" class="model-popover"></div>
-      </div>
       <button type="button" id="toolsToggle" class="nav-toggle" title="Tools">🛠</button>
     </div>
   </header>
@@ -1091,7 +1008,9 @@ const chat = document.getElementById('chat');
 const form = document.getElementById('form');
 const promptEl = document.getElementById('prompt');
 const sendBtn = document.getElementById('send');
-const modelEl = document.getElementById('model');
+// There's one tutor model now (the smartest one), so no picker. The server
+// decides the model anyway; this is only sent for clarity.
+const CHAT_MODEL = 'openai/gpt-oss-120b';
 const chatListEl = document.getElementById('chatList');
 const newChatBtn = document.getElementById('newChatBtn');
 const explainBtn = document.getElementById('explainBtn');
@@ -1151,64 +1070,6 @@ function renderFormulaSheet(gradeStr) {
   el.innerHTML = html;
 }
 renderFormulaSheet('');
-
-/* ---------- Model selector ---------- */
-const MODEL_INFO = {
-  'openai/gpt-oss-20b': "⚡ A quick, snappy helper — great for most everyday questions, and usually answers almost instantly.",
-  'openai/gpt-oss-120b': "🌟 The smartest helper here! Thinks extra carefully through trickier problems — a great pick when something needs more reasoning.",
-};
-const modelInfoBtn = document.getElementById('modelInfoBtn');
-const modelPopover = document.getElementById('modelPopover');
-
-const DAILY_LIMITED_MODEL = 'openai/gpt-oss-120b';
-
-async function renderModelInfo() {
-  const name = modelEl.value;
-  const desc = MODEL_INFO[name] || "No description available for this model yet.";
-  let extra = '';
-
-  if (name === DAILY_LIMITED_MODEL) {
-    extra = `<div class="mp-usage">Checking today's usage…</div>`;
-    modelPopover.innerHTML = `<div class="mp-name">${escapeHtml(name)}</div><div>${escapeHtml(desc)}</div>${extra}`;
-    try {
-      const res = await fetch('/api/usage', { cache: 'no-store' });
-      const u = await res.json();
-      if (modelEl.value !== DAILY_LIMITED_MODEL) return; // user switched away while fetching
-      const usageEl = modelPopover.querySelector('.mp-usage');
-      if (usageEl) {
-        if (u.requiresAccount) {
-          usageEl.innerHTML = `🔐 This model needs a free account. <button type="button" class="mp-signup-link">Sign up</button>`;
-          usageEl.classList.add('low');
-          const btn = usageEl.querySelector('.mp-signup-link');
-          if (btn) {
-            btn.style.cssText = 'background:none;border:none;color:var(--primary);font-weight:700;text-decoration:underline;cursor:pointer;padding:0;font-size:inherit;';
-            btn.addEventListener('click', () => { modelPopover.classList.remove('open'); openAccountModal('signup'); });
-          }
-        } else {
-          usageEl.textContent = `🌟 ${u.remaining} of ${u.limit} questions left today (resets at midnight)`;
-          usageEl.classList.toggle('low', u.remaining <= 3);
-        }
-      }
-    } catch {
-      const usageEl = modelPopover.querySelector('.mp-usage');
-      if (usageEl) usageEl.textContent = "Couldn't check today's usage.";
-    }
-  } else {
-    modelPopover.innerHTML = `<div class="mp-name">${escapeHtml(name)}</div><div>${escapeHtml(desc)}</div>`;
-  }
-  modelEl.title = desc;
-}
-
-async function loadModels() {
-  try {
-    const res = await fetch('/api/models');
-    const models = await res.json();
-    modelEl.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
-  } catch (e) {
-    modelEl.innerHTML = '<option>Could not load models</option>';
-  }
-  renderModelInfo();
-}
 
 /* ---------- Account system ---------- */
 let currentUser = null; // { name, grade } or null if guest
@@ -1383,7 +1244,6 @@ accountForm.addEventListener('submit', async (e) => {
     closeAccountModal();
     renderAccountStatus();
     renderFormulaSheet(currentUser.grade);
-    renderModelInfo(); // in case the smartest model is selected, refresh its "needs account" state
   } catch (err) {
     accountError.textContent = "Couldn't reach the server — is it running?";
     accountError.classList.add('show');
@@ -1399,7 +1259,6 @@ async function logoutUser() {
   currentUser = null;
   renderAccountStatus();
   renderFormulaSheet('');
-  renderModelInfo();
 }
 
 /* ---------- Forgot password ---------- */
@@ -1463,7 +1322,6 @@ async function deleteAccountFlow() {
     currentUser = null;
     renderAccountStatus();
     renderFormulaSheet('');
-    renderModelInfo();
     alert('Account deleted.');
   } catch (err) {
     alert("Couldn't reach the server — is it running?");
@@ -1521,23 +1379,6 @@ async function initAccount() {
   renderAccountStatus();
   renderFormulaSheet(currentUser ? currentUser.grade : '');
 }
-
-modelEl.addEventListener('change', () => {
-  renderModelInfo();
-  modelPopover.classList.add('open');
-});
-modelInfoBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  modelPopover.classList.toggle('open');
-});
-document.addEventListener('click', (e) => {
-  if (!modelPopover.contains(e.target) && e.target !== modelInfoBtn) {
-    modelPopover.classList.remove('open');
-  }
-});
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') modelPopover.classList.remove('open');
-});
 
 /* ---------- Chat session storage ---------- */
 const STORAGE_KEY = 'thinkstep_chats';
@@ -1631,10 +1472,13 @@ const MATH_SYMBOLS = [
 ];
 
 function tidyMath(s) {
-  if (!s || !/[\\${}^]|\*\*/.test(s)) {
+  if (!s || !/[\\${}^【]|\*\*/.test(s)) {
     return s; // fast path — nothing math-y or markdown-y in here
   }
   let t = s;
+
+  // web-search citation markers like 【2†L6-L10】 — meaningless to a kid
+  t = t.replace(/【[^】]*】/g, '');
 
   // Strip math delimiters FIRST, while the LaTeX inside is still
   // recognisable. $$...$$ is always math; $...$ only counts when it really
@@ -1899,25 +1743,24 @@ async function sendMessage(text) {
   aiDiv.innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span>';
   chat.scrollTop = chat.scrollHeight;
 
-  // If the model is still loading (common for a big model's first use),
-  // there can be a real wait before the first token arrives. Let the
-  // student know something's actually happening instead of just staring
-  // at bouncing dots with no explanation.
+  // The tutor thinks privately before it starts writing, and on a tricky
+  // question that can take several seconds. Let the student know it's
+  // working on it instead of leaving them staring at bouncing dots.
   const slowNoteTimer = setTimeout(() => {
     if (aiDiv.querySelector('.typing-dots')) {
       const note = document.createElement('span');
       note.className = 'typing-note';
-      note.textContent = "Still thinking — the model may still be warming up, this can take a minute the first time.";
+      note.textContent = "Thinking it through carefully — almost there…";
       aiDiv.appendChild(note);
       chat.scrollTop = chat.scrollHeight;
     }
-  }, 12000);
+  }, 6000);
 
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelEl.value, messages: active.messages, profile: { difficulty: currentDifficulty } })
+      body: JSON.stringify({ model: CHAT_MODEL, messages: active.messages, profile: { difficulty: currentDifficulty } })
     });
 
     // ThinkStep's own /api/chat route always returns text/plain, even for
@@ -1930,7 +1773,7 @@ async function sendMessage(text) {
     if (!res.ok || !contentType.includes('text/plain')) {
       clearTimeout(slowNoteTimer);
       aiDiv.textContent = res.status === 524
-        ? "The connection timed out before ThinkStep could answer — this can happen with the biggest model while it's still warming up. Try again in a bit, or pick a different model from the dropdown."
+        ? "The connection timed out before ThinkStep could answer. Try again in a bit, or pick the other helper from the dropdown."
         : `Something went wrong reaching ThinkStep (status ${res.status}). Try again in a moment.`;
       checkConnection();
       return;
@@ -2192,7 +2035,6 @@ function sendHeartbeat() {
 }
 
 /* ---------- Init ---------- */
-loadModels();
 renderChatList();
 renderMessages();
 renderTimer();
