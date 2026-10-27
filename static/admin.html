@@ -7,7 +7,10 @@
 <meta name="robots" content="noindex, nofollow">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="preload" href="/static/fonts/lexend-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts/lexend.css">
 <style>
+  button, input, textarea, select { font-family: inherit; } /* lexend */
   :root {
     --bg: #f4f8ff;
     --card: #ffffff;
@@ -25,7 +28,7 @@
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Lexend Variable', 'Segoe UI', system-ui, sans-serif;
     background: var(--bg);
     color: var(--text);
     -webkit-font-smoothing: antialiased;

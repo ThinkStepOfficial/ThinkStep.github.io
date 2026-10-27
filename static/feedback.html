@@ -6,7 +6,10 @@
 <title>Feedback — ThinkStep</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="preload" href="/static/fonts/lexend-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts/lexend.css">
 <style>
+  button, input, textarea, select { font-family: inherit; } /* lexend */
   :root {
     --bg: #f4f8ff;
     --card: #ffffff;
@@ -24,7 +27,7 @@
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Lexend Variable', 'Segoe UI', system-ui, sans-serif;
     background: var(--bg);
     color: var(--text);
     -webkit-font-smoothing: antialiased;
@@ -49,7 +52,7 @@
     align-items: center;
     gap: 10px;
     font-weight: 800;
-    font-size: 21px;
+    font-size: 22.5px;
     color: var(--primary-dark);
     text-decoration: none;
   }
@@ -68,7 +71,7 @@
     padding: 11px 22px;
     border-radius: 12px;
     font-weight: 700;
-    font-size: 14.5px;
+    font-size: 15.5px;
     text-decoration: none;
     cursor: pointer;
     border: none;
@@ -94,20 +97,20 @@
     display: inline-block;
     background: var(--primary-light);
     color: var(--primary-dark);
-    font-size: 12.5px;
+    font-size: 13.5px;
     font-weight: 700;
     padding: 6px 14px;
     border-radius: 999px;
     margin-bottom: 16px;
   }
   .page-head h1 {
-    font-size: 32px;
+    font-size: 34.5px;
     margin: 0 0 10px;
     letter-spacing: -0.01em;
   }
   .page-head p {
     color: var(--muted);
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1.6;
     margin: 0;
   }
@@ -122,7 +125,7 @@
 
   label {
     display: block;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     color: var(--text);
     margin-bottom: 6px;
@@ -133,7 +136,7 @@
     padding: 12px 14px;
     border-radius: 12px;
     border: 1px solid var(--border);
-    font-size: 15px;
+    font-size: 16px;
     font-family: inherit;
     background: var(--bg);
     color: var(--text);
@@ -159,7 +162,7 @@
     background: none;
     border: none;
     padding: 0;
-    font-size: 34px;
+    font-size: 36.5px;
     line-height: 1;
     cursor: pointer;
     color: var(--border);
@@ -169,7 +172,7 @@
   .star-rating button.filled { color: #f5b83d; }
   .star-hint {
     margin-top: 6px;
-    font-size: 12.5px;
+    font-size: 13.5px;
     color: var(--muted);
     min-height: 16px;
   }
@@ -180,7 +183,7 @@
     border-radius: 12px;
     background: var(--primary);
     color: white;
-    font-size: 15.5px;
+    font-size: 16.5px;
     font-weight: 700;
     border: none;
     cursor: pointer;
@@ -195,7 +198,7 @@
     margin-top: 16px;
     padding: 12px 14px;
     border-radius: 10px;
-    font-size: 13.5px;
+    font-size: 14.5px;
     display: none;
     line-height: 1.5;
   }
@@ -216,16 +219,16 @@
     padding: 20px 0;
   }
   .success-state .big-check {
-    font-size: 48px;
+    font-size: 52px;
     margin-bottom: 14px;
   }
   .success-state h2 {
     margin: 0 0 8px;
-    font-size: 22px;
+    font-size: 24px;
   }
   .success-state p {
     color: var(--muted);
-    font-size: 14.5px;
+    font-size: 15.5px;
     margin: 0 0 22px;
   }
 
@@ -233,7 +236,7 @@
     nav { padding: 14px 16px; }
     main { padding: 40px 16px 60px; }
     .feedback-card { padding: 24px 20px; }
-    .star-rating button { font-size: 30px; }
+    .star-rating button { font-size: 32.5px; }
   }
 </style>
 </head>

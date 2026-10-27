@@ -56,7 +56,10 @@
   ]
 }
 </script>
+<link rel="preload" href="/static/fonts/lexend-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts/lexend.css">
 <style>
+  button, input, textarea, select { font-family: inherit; } /* lexend */
   :root {
     --bg: #f4f8ff;
     --card: #ffffff;
@@ -76,7 +79,7 @@
   html { scroll-behavior: smooth; }
   body {
     margin: 0;
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Lexend Variable', 'Segoe UI', system-ui, sans-serif;
     background: var(--bg);
     color: var(--text);
     -webkit-font-smoothing: antialiased;
@@ -101,7 +104,7 @@
     align-items: center;
     gap: 10px;
     font-weight: 800;
-    font-size: 21px;
+    font-size: 22.5px;
     color: var(--primary-dark);
     text-decoration: none;
   }
@@ -121,7 +124,7 @@
     text-decoration: none;
     color: var(--muted);
     font-weight: 600;
-    font-size: 14.5px;
+    font-size: 15.5px;
     transition: color .15s var(--ease);
   }
   .nav-links a.nav-link:hover { color: var(--primary-dark); }
@@ -133,7 +136,7 @@
     padding: 12px 24px;
     border-radius: 12px;
     font-weight: 700;
-    font-size: 15px;
+    font-size: 16px;
     text-decoration: none;
     cursor: pointer;
     border: none;
@@ -163,7 +166,7 @@
     display: inline-block;
     background: var(--primary-light);
     color: var(--primary-dark);
-    font-size: 12.5px;
+    font-size: 13.5px;
     font-weight: 700;
     padding: 6px 14px;
     border-radius: 999px;
@@ -171,7 +174,7 @@
     letter-spacing: .02em;
   }
   .hero h1 {
-    font-size: 46px;
+    font-size: 49.5px;
     line-height: 1.15;
     margin: 0 0 18px;
     color: var(--text);
@@ -179,7 +182,7 @@
   }
   .hero h1 .accent { color: var(--primary); }
   .hero p.sub {
-    font-size: 18px;
+    font-size: 19.5px;
     color: var(--muted);
     max-width: 600px;
     margin: 0 auto 34px;
@@ -206,25 +209,25 @@
   }
   .start-box h2 {
     margin: 0 0 8px;
-    font-size: 26px;
+    font-size: 28px;
   }
   .start-box p {
     margin: 0 0 26px;
     color: rgba(255,255,255,0.85);
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1.6;
   }
   .start-box .btn-primary {
     background: white;
     color: var(--primary-dark);
     padding: 15px 34px;
-    font-size: 16px;
+    font-size: 17.5px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.18);
   }
   .start-box .btn-primary:hover { background: #f0f6ff; transform: translateY(-2px) scale(1.02); }
   .start-box .fine-print {
     margin-top: 18px;
-    font-size: 12.5px;
+    font-size: 13.5px;
     color: rgba(255,255,255,0.7);
   }
 
@@ -233,7 +236,7 @@
   .section-inner { max-width: 1080px; margin: 0 auto; }
   .section-title {
     text-align: center;
-    font-size: 30px;
+    font-size: 32.5px;
     margin: 0 0 10px;
     color: var(--text);
     letter-spacing: -0.01em;
@@ -241,7 +244,7 @@
   .section-sub {
     text-align: center;
     color: var(--muted);
-    font-size: 15.5px;
+    font-size: 16.5px;
     max-width: 560px;
     margin: 0 auto 46px;
     line-height: 1.6;
@@ -270,17 +273,17 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
+    font-size: 24px;
     margin-bottom: 16px;
   }
   .feature-card h3 {
     margin: 0 0 8px;
-    font-size: 16.5px;
+    font-size: 18px;
     color: var(--text);
   }
   .feature-card p {
     margin: 0;
-    font-size: 13.5px;
+    font-size: 14.5px;
     color: var(--muted);
     line-height: 1.6;
   }
@@ -297,8 +300,8 @@
     gap: 50px;
     align-items: center;
   }
-  .about-text h2 { font-size: 28px; margin: 0 0 16px; }
-  .about-text p { color: var(--muted); font-size: 15px; line-height: 1.75; margin: 0 0 14px; }
+  .about-text h2 { font-size: 30px; margin: 0 0 16px; }
+  .about-text p { color: var(--muted); font-size: 16px; line-height: 1.75; margin: 0 0 14px; }
   .about-text p:last-child { margin-bottom: 0; }
   .about-card {
     background: var(--bg);
@@ -317,7 +320,7 @@
     gap: 10px;
     padding: 10px 0;
     border-bottom: 1px dashed var(--border);
-    font-size: 14px;
+    font-size: 15px;
     color: var(--text);
   }
   .about-card li:last-child { border-bottom: none; }
@@ -332,7 +335,7 @@
     text-align: center;
     padding: 70px 24px 90px;
   }
-  .footer-cta h2 { font-size: 28px; margin: 0 0 10px; }
+  .footer-cta h2 { font-size: 30px; margin: 0 0 10px; }
   .footer-cta p { color: var(--muted); margin: 0 0 28px; }
 
   /* FEEDBACK CTA */
@@ -358,11 +361,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 26px;
+    font-size: 28px;
   }
   .feedback-cta-text { flex: 1; }
-  .feedback-cta-text h2 { margin: 0 0 6px; font-size: 20px; }
-  .feedback-cta-text p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+  .feedback-cta-text h2 { margin: 0 0 6px; font-size: 21.5px; }
+  .feedback-cta-text p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
   .feedback-cta-box .btn-primary { flex-shrink: 0; white-space: nowrap; }
 
   @media (max-width: 700px) {
@@ -373,22 +376,22 @@
     text-align: center;
     padding: 28px 24px;
     color: var(--muted);
-    font-size: 12.5px;
+    font-size: 13.5px;
     border-top: 1px solid var(--border);
   }
 
   @media (max-width: 860px) {
     .features-grid { grid-template-columns: 1fr 1fr; }
     .about-grid { grid-template-columns: 1fr; }
-    .hero h1 { font-size: 34px; }
+    .hero h1 { font-size: 36.5px; }
   }
   @media (max-width: 560px) {
     nav { padding: 14px 16px; }
     .nav-links { gap: 14px; }
     .nav-links a.nav-link { display: none; }
     .hero { padding: 56px 18px 40px; }
-    .hero h1 { font-size: 28px; }
-    .hero p.sub { font-size: 15.5px; }
+    .hero h1 { font-size: 30px; }
+    .hero p.sub { font-size: 16.5px; }
     .features-grid { grid-template-columns: 1fr; }
     section { padding: 46px 18px; }
     .start-box { padding: 30px 22px; margin-top: 40px; }

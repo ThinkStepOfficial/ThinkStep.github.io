@@ -6,7 +6,10 @@
 <title>Terms of Service — ThinkStep</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="preload" href="/static/fonts/lexend-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts/lexend.css">
 <style>
+  button, input, textarea, select { font-family: inherit; } /* lexend */
   :root {
     --bg: #f4f8ff;
     --card: #ffffff;
@@ -23,7 +26,7 @@
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Lexend Variable', 'Segoe UI', system-ui, sans-serif;
     background: var(--bg);
     color: var(--text);
     -webkit-font-smoothing: antialiased;
@@ -47,7 +50,7 @@
     align-items: center;
     gap: 10px;
     font-weight: 800;
-    font-size: 21px;
+    font-size: 22.5px;
     color: var(--primary-dark);
     text-decoration: none;
   }
@@ -64,7 +67,7 @@
     padding: 10px 20px;
     border-radius: 12px;
     font-weight: 700;
-    font-size: 14px;
+    font-size: 15px;
     text-decoration: none;
     background: white;
     color: var(--primary-dark);
@@ -86,22 +89,22 @@
     box-shadow: var(--shadow-md);
   }
   .doc-card h1 {
-    font-size: 30px;
+    font-size: 32.5px;
     margin: 0 0 6px;
   }
   .updated {
     color: var(--muted);
-    font-size: 13px;
+    font-size: 14px;
     margin: 0 0 32px;
   }
   .doc-card h2 {
-    font-size: 18px;
+    font-size: 19.5px;
     color: var(--primary-dark);
     margin: 34px 0 10px;
   }
   .doc-card h2:first-of-type { margin-top: 0; }
   .doc-card p, .doc-card li {
-    font-size: 14.5px;
+    font-size: 15.5px;
     line-height: 1.75;
     color: var(--text);
   }
@@ -113,7 +116,7 @@
     border-radius: 14px;
     padding: 18px 20px;
     margin: 18px 0;
-    font-size: 14px;
+    font-size: 15px;
     line-height: 1.7;
   }
   .callout strong { color: var(--primary-dark); }
@@ -121,7 +124,7 @@
     margin-top: 36px;
     padding-top: 24px;
     border-top: 1px solid var(--border);
-    font-size: 14.5px;
+    font-size: 15.5px;
     color: var(--muted);
   }
   .contact-box a { font-weight: 700; }

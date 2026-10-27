@@ -7,7 +7,10 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="preload" href="/static/fonts/lexend-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts/lexend.css">
 <style>
+  button, input, textarea, select { font-family: inherit; } /* lexend */
   :root {
     --bg: #f4f8ff;
     --card: #ffffff;
@@ -35,7 +38,7 @@
 
   body {
     margin: 0;
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Lexend Variable', 'Segoe UI', system-ui, sans-serif;
     background: var(--bg);
     color: var(--text);
     height: 100vh;
@@ -65,7 +68,7 @@
     align-items: center;
     gap: 10px;
     font-weight: 800;
-    font-size: 21px;
+    font-size: 23.5px;
     color: var(--primary-dark);
     letter-spacing: -0.01em;
   }
@@ -78,7 +81,7 @@
     box-shadow: 0 0 0 4px var(--primary-light);
   }
   .tagline {
-    font-size: 12.5px;
+    font-size: 14px;
     color: var(--muted);
     margin-top: 3px;
   }
@@ -96,7 +99,7 @@
     color: #8a5a00;
     border-bottom: 1px solid #f0d9a8;
     padding: 9px 24px;
-    font-size: 13px;
+    font-size: 14.5px;
     text-align: center;
   }
   #connBanner.show { display: block; animation: slideDown .2s var(--ease); }
@@ -114,7 +117,7 @@
     justify-content: center;
     gap: 10px;
     padding: 10px 24px;
-    font-size: 13.5px;
+    font-size: 15px;
     font-weight: 600;
     text-align: center;
   }
@@ -132,7 +135,7 @@
   #seasonalBanner .close-banner {
     background: none;
     border: none;
-    font-size: 15px;
+    font-size: 17px;
     cursor: pointer;
     color: inherit;
     opacity: .6;
@@ -154,7 +157,7 @@
   }
   .sidebar-left .section-title {
     padding: 16px 16px 6px;
-    font-size: 11px;
+    font-size: 12.5px;
     letter-spacing: .06em;
     text-transform: uppercase;
     color: var(--muted);
@@ -168,7 +171,7 @@
     border: none;
     border-radius: 10px;
     font-weight: 700;
-    font-size: 14px;
+    font-size: 15.5px;
     cursor: pointer;
     box-shadow: var(--shadow-sm);
     transition: background .15s var(--ease), transform .1s var(--ease), box-shadow .15s var(--ease);
@@ -189,7 +192,7 @@
     padding: 10px 11px;
     border-radius: 9px;
     cursor: pointer;
-    font-size: 13.5px;
+    font-size: 15px;
     color: var(--text);
     margin-bottom: 2px;
     transition: background .12s var(--ease);
@@ -205,7 +208,7 @@
   #chatList li .del {
     opacity: 0;
     color: var(--muted);
-    font-size: 15px;
+    font-size: 17px;
     padding: 0 4px;
     transition: opacity .12s var(--ease), color .12s var(--ease);
   }
@@ -236,7 +239,7 @@
   }
   #feedbackLink {
     padding: 7px 14px;
-    font-size: 12.5px;
+    font-size: 14px;
     background: white;
     color: var(--primary-dark);
     border: 1px solid var(--border);
@@ -247,7 +250,7 @@
   #feedbackLink:hover { background: var(--primary-light); }
   #exportBtn {
     padding: 7px 14px;
-    font-size: 12.5px;
+    font-size: 14px;
     background: white;
     color: var(--primary-dark);
     border: 1px solid var(--border);
@@ -268,8 +271,8 @@
     max-width: 75%;
     padding: 12px 16px;
     border-radius: var(--radius);
-    line-height: 1.55;
-    font-size: 15px;
+    line-height: 1.6;
+    font-size: 18px;
     white-space: pre-wrap;
     box-shadow: var(--shadow-sm);
     animation: msgIn .18s var(--ease);
@@ -293,7 +296,7 @@
   .msg.ai::before {
     content: "🧠 ThinkStep";
     display: block;
-    font-size: 11px;
+    font-size: 12.5px;
     font-weight: 700;
     color: var(--primary-dark);
     margin-bottom: 4px;
@@ -319,7 +322,7 @@
   }
   .typing-note {
     display: block;
-    font-size: 11px;
+    font-size: 12.5px;
     color: var(--muted);
     margin-top: 6px;
   }
@@ -337,7 +340,7 @@
     padding: 13px 16px;
     border-radius: 12px;
     border: 1px solid var(--border);
-    font-size: 15px;
+    font-size: 17px;
     outline: none;
     background: var(--bg);
     transition: border-color .15s var(--ease), background .15s var(--ease), box-shadow .15s var(--ease);
@@ -349,7 +352,7 @@
     border-radius: 12px;
     background: var(--primary);
     color: white;
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 700;
     cursor: pointer;
     transition: background .15s var(--ease), transform .1s var(--ease), box-shadow .15s var(--ease);
@@ -365,7 +368,7 @@
     color: var(--muted);
     animation: msgIn .25s var(--ease);
   }
-  .empty-state h2 { color: var(--primary-dark); margin-bottom: 6px; font-size: 22px; }
+  .empty-state h2 { color: var(--primary-dark); margin-bottom: 6px; font-size: 24.5px; }
 
   /* MIC BUTTON */
   #micBtn {
@@ -406,14 +409,14 @@
   .tool-card:hover { box-shadow: var(--shadow-md); }
   .tool-card h3 {
     margin: 0 0 10px;
-    font-size: 13px;
+    font-size: 14.5px;
     color: var(--primary-dark);
     display: flex;
     align-items: center;
     gap: 6px;
   }
   .timer-display {
-    font-size: 30px;
+    font-size: 33.5px;
     font-weight: 800;
     text-align: center;
     color: var(--primary-dark);
@@ -427,7 +430,7 @@
   }
   .feedback-card { background: linear-gradient(160deg, var(--primary-light), var(--card)); }
   .feedback-card-text {
-    font-size: 12px;
+    font-size: 13.5px;
     color: var(--muted);
     line-height: 1.5;
     margin: 0 0 10px;
@@ -444,7 +447,7 @@
   .timer-controls button, .tool-card .small-btn {
     flex: 1;
     padding: 8px;
-    font-size: 12.5px;
+    font-size: 14px;
     border-radius: 9px;
     background: var(--primary);
     color: white;
@@ -463,7 +466,7 @@
     border-radius: 10px;
     border: 1px solid var(--border);
     padding: 9px;
-    font-size: 13px;
+    font-size: 14.5px;
     font-family: inherit;
     resize: vertical;
     background: white;
@@ -471,14 +474,14 @@
   }
   textarea#notes:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
   .formula-subject {
-    font-size: 12px;
+    font-size: 13.5px;
     font-weight: 700;
     color: var(--primary-dark);
     margin: 10px 0 4px;
   }
   .formula-subject:first-child { margin-top: 0; }
   .formula-hint {
-    font-size: 11px;
+    font-size: 12.5px;
     color: var(--muted);
     margin-bottom: 8px;
     line-height: 1.4;
@@ -486,7 +489,7 @@
   .formula-list {
     margin: 0;
     padding-left: 16px;
-    font-size: 12.5px;
+    font-size: 14px;
     color: var(--text);
     line-height: 1.65;
   }
@@ -503,7 +506,7 @@
   .difficulty-row button {
     flex: 1;
     padding: 7px 4px;
-    font-size: 11px;
+    font-size: 12.5px;
     border-radius: 9px;
     background: white;
     color: var(--muted);
@@ -519,7 +522,7 @@
 
   /* ACCOUNT CARD */
   .account-status {
-    font-size: 12.5px;
+    font-size: 14px;
     color: var(--text);
     line-height: 1.5;
     margin-bottom: 10px;
@@ -546,7 +549,7 @@
   .account-buttons button {
     flex: 1;
     padding: 8px;
-    font-size: 12.5px;
+    font-size: 14px;
   }
   .account-buttons button.secondary {
     background: white;
@@ -597,7 +600,7 @@
     font-weight: 700;
     cursor: pointer;
     padding: 0;
-    font-size: 12px;
+    font-size: 13.5px;
   }
   .account-modal {
     background: white;
@@ -610,17 +613,17 @@
   }
   .account-modal h2 {
     margin: 0 0 4px;
-    font-size: 19px;
+    font-size: 21.5px;
     color: var(--primary-dark);
   }
   .account-modal .sub {
-    font-size: 12.5px;
+    font-size: 14px;
     color: var(--muted);
     margin-bottom: 18px;
   }
   .account-modal label {
     display: block;
-    font-size: 12px;
+    font-size: 13.5px;
     font-weight: 700;
     color: var(--text);
     margin-bottom: 4px;
@@ -631,7 +634,7 @@
     padding: 10px 12px;
     border-radius: 10px;
     border: 1px solid var(--border);
-    font-size: 14px;
+    font-size: 15.5px;
     font-family: inherit;
     background: white;
     color: var(--text);
@@ -641,7 +644,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: 14.5px;
     font-weight: 600;
     color: var(--text);
     margin-top: 14px;
@@ -653,7 +656,7 @@
     cursor: pointer;
   }
   .account-modal .field-hint {
-    font-size: 11.5px;
+    font-size: 13px;
     color: var(--muted);
     margin-top: 6px;
     line-height: 1.4;
@@ -666,7 +669,7 @@
     border: 1px solid #f3c6c1;
     border-radius: 8px;
     padding: 8px 10px;
-    font-size: 12.5px;
+    font-size: 14px;
     margin-top: 14px;
   }
   .account-modal .error-msg.show { display: block; }
@@ -678,7 +681,7 @@
   .account-modal .switch-mode {
     text-align: center;
     margin-top: 14px;
-    font-size: 12.5px;
+    font-size: 14px;
     color: var(--muted);
   }
   .account-modal .switch-mode button {
@@ -688,14 +691,14 @@
     font-weight: 700;
     cursor: pointer;
     padding: 0;
-    font-size: 12.5px;
+    font-size: 14px;
   }
   .account-modal .close-btn {
     float: right;
     background: none;
     border: none;
     color: var(--muted);
-    font-size: 18px;
+    font-size: 20px;
     cursor: pointer;
     padding: 0;
     line-height: 1;
@@ -715,12 +718,12 @@
     padding: 10px 4px;
   }
   .streak-stat .num {
-    font-size: 21px;
+    font-size: 23.5px;
     font-weight: 800;
     color: var(--primary-dark);
   }
   .streak-stat .label {
-    font-size: 10.5px;
+    font-size: 12px;
     color: var(--muted);
     margin-top: 2px;
   }
@@ -732,7 +735,7 @@
     background: white;
     color: var(--primary-dark);
     border: 1px solid var(--border);
-    font-size: 18px;
+    font-size: 20px;
     line-height: 1;
     border-radius: 10px;
   }
@@ -802,27 +805,27 @@
       min-height: 52px;
     }
     .header-left { gap: 6px; }
-    .brand { font-size: 17px; }
+    .brand { font-size: 19px; }
     .brand span.dot { width: 9px; height: 9px; box-shadow: 0 0 0 3px var(--primary-light); }
     .tagline { display: none; }
     .model-picker { gap: 6px; }
 
-    .nav-toggle { min-width: 42px; min-height: 42px; font-size: 19px; }
+    .nav-toggle { min-width: 42px; min-height: 42px; font-size: 21.5px; }
 
     .chat-toolbar { padding: 8px 14px; }
     #exportBtn { min-height: 38px; }
 
     main { padding: 14px; gap: 10px; -webkit-overflow-scrolling: touch; }
-    .msg { max-width: 90%; font-size: 15px; padding: 11px 14px; }
-    .empty-state h2 { font-size: 19px; }
-    .empty-state p { font-size: 14px; }
+    .msg { max-width: 90%; font-size: 17px; padding: 11px 14px; }
+    .empty-state h2 { font-size: 21.5px; }
+    .empty-state p { font-size: 15.5px; }
 
     footer {
       padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
       position: sticky;
       bottom: 0;
     }
-    input#prompt { font-size: 16px; padding: 13px 14px; min-height: 46px; } /* 16px avoids iOS zoom */
+    input#prompt { font-size: 17px; padding: 13px 14px; min-height: 46px; } /* 16px avoids iOS zoom */
     button { padding: 0 16px; min-height: 46px; }
     #send { min-width: 64px; }
     #micBtn { padding: 0; min-width: 46px; }
@@ -834,12 +837,12 @@
       -webkit-overflow-scrolling: touch;
     }
     .tool-card { padding: 14px; }
-    .account-modal select, .account-modal input { min-height: 40px; font-size: 15px; }
-    .difficulty-row button { min-height: 38px; font-size: 12px; }
+    .account-modal select, .account-modal input { min-height: 40px; font-size: 17px; }
+    .difficulty-row button { min-height: 38px; font-size: 13.5px; }
     .timer-controls button { min-height: 40px; }
-    #chatList li { padding: 12px 12px; font-size: 14.5px; }
-    #chatList li .del { opacity: 1; padding: 4px 6px; font-size: 17px; }
-    #newChatBtn { min-height: 46px; font-size: 15px; }
+    #chatList li { padding: 12px 12px; font-size: 16px; }
+    #chatList li .del { opacity: 1; padding: 4px 6px; font-size: 19px; }
+    #newChatBtn { min-height: 46px; font-size: 17px; }
   }
 </style>
 </head>
@@ -994,7 +997,7 @@
       <span id="switchModePrompt">Already have an account?</span>
       <button type="button" id="switchModeBtn">Log In</button>
     </div>
-    <div style="text-align:center; margin-top:14px; font-size:11.5px; color:var(--muted);">
+    <div style="text-align:center; margin-top:14px; font-size: 13px; color:var(--muted);">
       <a href="/privacy" target="_blank" style="color:inherit; text-decoration:underline;">Privacy Policy</a>
       &middot; <a href="/terms" target="_blank" style="color:inherit; text-decoration:underline;">Terms of Service</a>
     </div>
@@ -1374,7 +1377,7 @@ async function deleteAccountFlow() {
 
 function renderAccountStatus() {
   if (currentUser) {
-    accountStatusEl.innerHTML = `Signed in as <strong>${escapeHtml(currentUser.name)}</strong><br><span style="color:var(--muted); font-size:11px;">Grade ${escapeHtml(currentUser.grade || '—')}</span>`;
+    accountStatusEl.innerHTML = `Signed in as <strong>${escapeHtml(currentUser.name)}</strong><br><span style="color:var(--muted); font-size: 12.5px;">Grade ${escapeHtml(currentUser.grade || '—')}</span>`;
     if (!document.getElementById('logoutBtn')) {
       accountButtonsEl.innerHTML = `
         <button type="button" id="logoutBtn" class="secondary">Log Out</button>

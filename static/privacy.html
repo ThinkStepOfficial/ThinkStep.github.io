@@ -6,7 +6,10 @@
 <title>Privacy Policy — ThinkStep</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="preload" href="/static/fonts/lexend-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts/lexend.css">
 <style>
+  button, input, textarea, select { font-family: inherit; } /* lexend */
   :root {
     --bg: #f4f8ff;
     --card: #ffffff;
@@ -23,7 +26,7 @@
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Lexend Variable', 'Segoe UI', system-ui, sans-serif;
     background: var(--bg);
     color: var(--text);
     -webkit-font-smoothing: antialiased;
@@ -47,7 +50,7 @@
     align-items: center;
     gap: 10px;
     font-weight: 800;
-    font-size: 21px;
+    font-size: 22.5px;
     color: var(--primary-dark);
     text-decoration: none;
   }
@@ -64,7 +67,7 @@
     padding: 10px 20px;
     border-radius: 12px;
     font-weight: 700;
-    font-size: 14px;
+    font-size: 15px;
     text-decoration: none;
     background: white;
     color: var(--primary-dark);
@@ -86,22 +89,22 @@
     box-shadow: var(--shadow-md);
   }
   .doc-card h1 {
-    font-size: 30px;
+    font-size: 32.5px;
     margin: 0 0 6px;
   }
   .updated {
     color: var(--muted);
-    font-size: 13px;
+    font-size: 14px;
     margin: 0 0 32px;
   }
   .doc-card h2 {
-    font-size: 18px;
+    font-size: 19.5px;
     color: var(--primary-dark);
     margin: 34px 0 10px;
   }
   .doc-card h2:first-of-type { margin-top: 0; }
   .doc-card p, .doc-card li {
-    font-size: 14.5px;
+    font-size: 15.5px;
     line-height: 1.75;
     color: var(--text);
   }
@@ -113,7 +116,7 @@
     border-radius: 14px;
     padding: 18px 20px;
     margin: 18px 0;
-    font-size: 14px;
+    font-size: 15px;
     line-height: 1.7;
   }
   .callout strong { color: var(--primary-dark); }
@@ -121,7 +124,7 @@
     margin-top: 36px;
     padding-top: 24px;
     border-top: 1px solid var(--border);
-    font-size: 14.5px;
+    font-size: 15.5px;
     color: var(--muted);
   }
   .contact-box a { font-weight: 700; }
@@ -143,7 +146,7 @@
 <main>
   <div class="doc-card">
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated: August 2026</p>
+    <p class="updated">Last updated: October 2026</p>
 
     <div class="callout">
       <strong>In plain language:</strong> ThinkStep collects the smallest amount of
@@ -212,11 +215,31 @@
     <h2>How information is stored</h2>
     <p>
       Passwords are never stored in plain text — only a secure, one-way hash.
-      Account and chat data is stored to operate the app and is not shared with
-      third parties except services strictly necessary to run ThinkStep (for
-      example, a payment processor if you subscribe, which never receives your
-      chat content).
+      Your chat history is saved in your own browser on your device, not on
+      our servers (except messages caught by the safety check described above).
+      Account and chat data is not shared with anyone except the services below,
+      which ThinkStep needs in order to work.
     </p>
+
+    <h2>Services that help run ThinkStep</h2>
+    <p>Each of these only receives what it needs to do its job:</p>
+    <ul>
+      <li><strong>Groq</strong> (the AI that writes the tutor's replies): receives
+        your chat messages, plus your first name, grade and difficulty setting so
+        replies fit your level. Groq's terms say it does not use this data to
+        train AI models.</li>
+      <li><strong>Exa</strong> (web search, used through Groq): for some questions
+        that need up-to-date facts, the last few lines of the conversation are
+        used to search the web. Your name, grade and account details are not
+        included.</li>
+      <li><strong>Render</strong> (website hosting) and <strong>Neon</strong>
+        (database): run the website and store account information, feedback,
+        and safety-check logs.</li>
+      <li><strong>Gmail</strong> (email): sends parent-consent and password-reset
+        emails, and lets the app's operator receive feedback and safety alerts.</li>
+    </ul>
+    <p>We never use these services for advertising, and we don't sell
+      information to them or to anyone else.</p>
 
     <h2>Changes to this policy</h2>
     <p>
