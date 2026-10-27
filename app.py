@@ -31,9 +31,10 @@ import queue
 import uuid
 import secrets
 import hmac
+import hashlib
 import smtplib
 from email.mime.text import MIMEText
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # BASE_DIR is where every local JSON data file (users.json, feedback.json,
@@ -517,6 +518,105 @@ def _recovery_email_for(user):
 
 
 # ============================================================
+# Telling visitors apart (for spam limits)
+#
+# On Render, the edge network overwrites the True-Client-IP header with the
+# visitor's real IP address — a fake value sent by the visitor is replaced —
+# so it can be trusted there. (X-Forwarded-For can NOT: Render keeps a
+# visitor-supplied fake at the front.) Anywhere else, like your own
+# computer or the tests, headers could be faked, so they're ignored.
+#
+# The IP is never stored: visitor_id() is a one-way scramble of it, mixed
+# with the app's secret key, so it can't be turned back into an address.
+# ============================================================
+def client_ip():
+    if os.environ.get("RENDER"):
+        ip = (request.headers.get("True-Client-IP") or "").strip()
+        if ip:
+            return ip
+    return request.remote_addr or "unknown"
+
+
+def visitor_id():
+    return hashlib.sha256(f"{app.secret_key}|{client_ip()}".encode()).hexdigest()[:20]
+
+
+class SlidingWindowLimiter:
+    """At most `limit` events per `window_seconds` for each key (in memory,
+    so it resets if the server restarts — fine for spam throttling)."""
+
+    def __init__(self, limit, window_seconds):
+        self.limit = limit
+        self.window = window_seconds
+        self._events = {}
+        self._lock = threading.Lock()
+
+    def _recent(self, key, now):
+        cutoff = now - self.window
+        events = [t for t in self._events.get(key, []) if t > cutoff]
+        if events:
+            self._events[key] = events
+        else:
+            self._events.pop(key, None)
+        if len(self._events) > 20000:  # keep memory bounded: drop stale keys
+            for k in list(self._events):
+                if not any(t > cutoff for t in self._events[k]):
+                    del self._events[k]
+        return events
+
+    def seconds_until_allowed(self, key):
+        """0 if another event is allowed right now, else seconds to wait."""
+        now = datetime.now(timezone.utc).timestamp()
+        with self._lock:
+            events = self._recent(key, now)
+            if len(events) < self.limit:
+                return 0
+            return max(1, int(events[0] + self.window - now) + 1)
+
+    def record(self, key):
+        now = datetime.now(timezone.utc).timestamp()
+        with self._lock:
+            self._recent(key, now)
+            self._events.setdefault(key, []).append(now)
+
+    def hit(self, key):
+        """Records an event if allowed. Returns 0 if allowed, else the
+        number of seconds to wait."""
+        now = datetime.now(timezone.utc).timestamp()
+        with self._lock:
+            events = self._recent(key, now)
+            if len(events) >= self.limit:
+                return max(1, int(events[0] + self.window - now) + 1)
+            self._events.setdefault(key, []).append(now)
+            return 0
+
+    def clear(self, key):
+        with self._lock:
+            self._events.pop(key, None)
+
+
+# Spam limits. Generous enough for a whole class on one school network,
+# tight enough that a script can't flood the site.
+SIGNUP_LIMIT_PER_HOUR = 20           # new accounts per visitor
+FEEDBACK_LIMIT_PER_HOUR = 3          # feedback messages per visitor
+CHAT_BURST_PER_MINUTE = 6            # questions per account/guest (no real kid types faster)
+CHAT_LIMIT_PER_VISITOR_HOUR = 120    # questions from one network, all accounts combined
+GUEST_DAILY_LIMIT_PER_VISITOR = 60   # guest questions from one network per day
+FEEDBACK_KEEP = 1000                 # only the newest feedback entries are stored
+
+_signup_limiter = SlidingWindowLimiter(SIGNUP_LIMIT_PER_HOUR, 3600)
+_feedback_limiter = SlidingWindowLimiter(FEEDBACK_LIMIT_PER_HOUR, 3600)
+_reset_email_limiter = SlidingWindowLimiter(5, 3600)  # password-reset requests per visitor
+_chat_burst_limiter = SlidingWindowLimiter(CHAT_BURST_PER_MINUTE, 60)
+_chat_visitor_limiter = SlidingWindowLimiter(CHAT_LIMIT_PER_VISITOR_HOUR, 3600)
+
+
+def _minutes(seconds):
+    m = max(1, (seconds + 59) // 60)
+    return f"{m} minute{'s' if m != 1 else ''}"
+
+
+# ============================================================
 # Login rate-limiting — a simple in-memory brute-force guard.
 # After too many wrong passwords in a row for the same account
 # name, further attempts are blocked for a cooldown window. This
@@ -569,10 +669,13 @@ def _clear_login_failures(key):
 # never in the source code or sent to the browser.
 # ============================================================
 ADMIN_CONFIG_FILE = os.path.join(BASE_DIR, "admin_config.json")
-ADMIN_MAX_ATTEMPTS = 8
+ADMIN_MAX_ATTEMPTS = 8          # wrong guesses per visitor before THEY are locked out
+ADMIN_GLOBAL_MAX_ATTEMPTS = 50  # wrong guesses from everyone combined before it locks for all
 ADMIN_LOCKOUT_MINUTES = 10
-_admin_login_attempts = {"count": 0, "locked_at": None}
-_admin_login_lock = threading.Lock()
+# Per visitor, so a stranger guessing wrong can't lock YOU out. The global
+# ceiling still stops someone guessing from many different networks.
+_admin_failures = SlidingWindowLimiter(ADMIN_MAX_ATTEMPTS, ADMIN_LOCKOUT_MINUTES * 60)
+_admin_failures_all = SlidingWindowLimiter(ADMIN_GLOBAL_MAX_ATTEMPTS, ADMIN_LOCKOUT_MINUTES * 60)
 
 
 def _load_admin_password_hash():
@@ -596,29 +699,20 @@ def _admin_password_matches(password):
 
 
 def _admin_locked():
-    with _admin_login_lock:
-        if _admin_login_attempts["count"] < ADMIN_MAX_ATTEMPTS:
-            return False, 0
-        elapsed = datetime.now(timezone.utc) - _admin_login_attempts["locked_at"]
-        remaining = timedelta(minutes=ADMIN_LOCKOUT_MINUTES) - elapsed
-        if remaining.total_seconds() <= 0:
-            _admin_login_attempts["count"] = 0
-            _admin_login_attempts["locked_at"] = None
-            return False, 0
-        return True, max(1, int(remaining.total_seconds() // 60) + 1)
+    wait = max(_admin_failures.seconds_until_allowed(visitor_id()),
+               _admin_failures_all.seconds_until_allowed("all"))
+    if not wait:
+        return False, 0
+    return True, max(1, (wait + 59) // 60)
 
 
 def _admin_record_failure():
-    with _admin_login_lock:
-        _admin_login_attempts["count"] += 1
-        if _admin_login_attempts["count"] >= ADMIN_MAX_ATTEMPTS:
-            _admin_login_attempts["locked_at"] = datetime.now(timezone.utc)
+    _admin_failures.record(visitor_id())
+    _admin_failures_all.record("all")
 
 
 def _admin_clear_failures():
-    with _admin_login_lock:
-        _admin_login_attempts["count"] = 0
-        _admin_login_attempts["locked_at"] = None
+    _admin_failures.clear(visitor_id())
 
 
 def require_admin():
@@ -695,13 +789,34 @@ def guest_questions_used(guest_id):
         return _load_guest_usage().get(guest_id, 0)
 
 
-def record_guest_usage(guest_id):
+def record_guest_usage(guest_id, visitor=None):
     if not guest_id:
         return
     with _guest_lock:
         data = _load_guest_usage()
         data[guest_id] = data.get(guest_id, 0) + 1
         _save_guest_usage(data)
+        if visitor:
+            daily = _load_guest_visitor_usage()
+            daily["counts"][visitor] = daily["counts"].get(visitor, 0) + 1
+            STORE.write("guest_visitor_usage.json", daily)
+
+
+# Guest questions per network per day. Clearing cookies (or a private
+# window) gives a new guest ID and 20 fresh questions, so the network
+# itself is capped too. Only the scrambled visitor_id() is stored, and the
+# whole list is replaced each day, so it never grows.
+def _load_guest_visitor_usage():
+    today = datetime.now(timezone.utc).date().isoformat()
+    data = STORE.read("guest_visitor_usage.json", {}) or {}
+    if data.get("date") != today or not isinstance(data.get("counts"), dict):
+        data = {"date": today, "counts": {}}
+    return data
+
+
+def guest_questions_from_visitor_today(visitor):
+    with _guest_lock:
+        return _load_guest_visitor_usage()["counts"].get(visitor, 0)
 
 
 def get_or_create_guest_id():
@@ -745,13 +860,38 @@ def attach_guest_cookie_if_new(resp, guest_id, is_new):
 # Without this file, feedback still gets saved locally, it just
 # won't be emailed until it's set up.
 # ============================================================
-FEEDBACK_TO_EMAIL = "ThinkStepv1.0@gmail.com"
+# Where feedback and safety alerts are sent (OPERATOR_EMAIL on Render overrides it).
+FEEDBACK_TO_EMAIL = (os.environ.get("OPERATOR_EMAIL") or "ThinkStepv1.0@gmail.com").strip()
 EMAIL_CONFIG_FILE = os.path.join(BASE_DIR, "email_config.json")
 FEEDBACK_FILE = os.path.join(BASE_DIR, "feedback.json")
 _feedback_lock = threading.Lock()
 
 
+# ---- Brevo (for Render) ----
+# Render's free plan blocks the ports normal email (Gmail/SMTP) uses, so
+# on Render, email goes through Brevo's web API instead (free: 300 emails a
+# day), which uses ordinary web traffic. Set these on Render (Environment):
+#   BREVO_API_KEY  — from Brevo: Settings -> SMTP & API -> API keys
+#   EMAIL_FROM     — the sender address you verified in Brevo
+#   EMAIL_FROM_NAME (optional) — defaults to "ThinkStep"
+BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email"
+
+
+def _brevo_settings():
+    key = (os.environ.get("BREVO_API_KEY") or "").strip()
+    sender = (os.environ.get("EMAIL_FROM") or "").strip()
+    if key and sender:
+        return key, sender, (os.environ.get("EMAIL_FROM_NAME") or "ThinkStep").strip()
+    return None
+
+
 def _load_email_config():
+    """Gmail sender + app password — from Render-style settings
+    (GMAIL_ADDRESS / GMAIL_APP_PASSWORD) or email_config.json."""
+    sender = (os.environ.get("GMAIL_ADDRESS") or "").strip()
+    app_password = (os.environ.get("GMAIL_APP_PASSWORD") or "").replace(" ", "").strip()
+    if sender and app_password:
+        return sender, app_password
     try:
         with open(EMAIL_CONFIG_FILE, "r") as f:
             cfg = json.load(f)
@@ -764,6 +904,35 @@ def _load_email_config():
     return None
 
 
+def email_provider():
+    """Which way email will be sent: "brevo", "gmail", or None (not set up).
+    Gmail is reported as unusable on Render, where its ports are blocked."""
+    if _brevo_settings():
+        return "brevo"
+    if _load_email_config():
+        return None if os.environ.get("RENDER") else "gmail"
+    return None
+
+
+def _send_via_brevo(to_email, subject, body):
+    key, sender, sender_name = _brevo_settings()
+    try:
+        r = requests.post(BREVO_SEND_URL, headers={
+            "api-key": key, "accept": "application/json", "content-type": "application/json",
+        }, json={
+            "sender": {"name": sender_name, "email": sender},
+            "to": [{"email": to_email}],
+            "subject": subject,
+            "textContent": body,
+        }, timeout=(5, 15))
+        if r.status_code in (200, 201, 202):
+            return True
+        print(f"[ThinkStep] Brevo refused the email ({r.status_code}): {r.text[:200]!r}")
+    except Exception as e:
+        print(f"[ThinkStep] Couldn't reach Brevo to send email: {e}")
+    return False
+
+
 def _load_feedback():
     return STORE.read("feedback.json", []) or []
 
@@ -772,16 +941,23 @@ def _save_feedback_locally(entry):
     with _feedback_lock:
         feedback = _load_feedback()
         feedback.append(entry)
-        STORE.write("feedback.json", feedback)
+        # keep only the newest entries so storage can't grow forever
+        STORE.write("feedback.json", feedback[-FEEDBACK_KEEP:])
 
 
 def send_email(to_email, subject, body):
     """Generic email sender used for both feedback and parental-consent
     requests. Returns True if it actually sent, False otherwise (never
     raises — a broken email setup should never crash a request)."""
+    if _brevo_settings():
+        return _send_via_brevo(to_email, subject, body)
     creds = _load_email_config()
     if not creds:
-        print("[ThinkStep] email_config.json not set up — email not sent.")
+        print("[ThinkStep] Email isn't set up (no BREVO_API_KEY/EMAIL_FROM, no Gmail settings) — email not sent.")
+        return False
+    if os.environ.get("RENDER"):
+        print("[ThinkStep] Not sending: Render's free plan blocks Gmail's email ports. "
+              "Set BREVO_API_KEY and EMAIL_FROM instead.")
         return False
     sender_email, app_password = creds
 
@@ -967,7 +1143,10 @@ sounds.
 
 You HELP with: math, reading, writing, spelling, grammar, science, history,
 geography, languages, study skills, understanding a homework question, and
-checking work the student has done.
+checking work the student has done. Follow-up requests about the schoolwork
+you're already discussing are always on-task too — "look it up",
+"search it up", "give me an example", "explain it another way",
+"I don't get it".
 
 You REFUSE everything else, including: recipes, cooking, baking, crafts,
 DIY projects, and other everyday how-to questions (unless the student says
@@ -1045,7 +1224,15 @@ Your job is to help kids LEARN, not to hand them answers. Follow these rules:
      guide the student to the answer with hints and questions.
    - You can name a source when it helps ("According to NASA, ..."), but
      never give links or web addresses.
-   - If a note seems wrong, unsafe, or not right for a child, ignore it.
+   - If a note seems wrong, unsafe, not right for a child, or about a
+     different topic than the one you're discussing (for example, notes
+     about Microsoft Word when the student asked how to say the word
+     "word"), ignore that note — and NEVER refuse the student because of
+     what's in the notes. Decide on-task vs off-task from the conversation
+     alone.
+   - If a student asks you to "look it up" or "search it", that's a normal
+     schoolwork request. Use the WEB NOTES if there are any; if there are
+     none, help with what you already know.
 
 How to write math (very important — the chat shows your reply as plain
 text, so any special math formatting shows up as confusing symbols):
@@ -1094,9 +1281,34 @@ Safety rules (always follow these, no exceptions):
 # Tried in order. The safeguard model is purpose-built for classifying
 # against a written policy, but it's a Groq "preview" model that could be
 # removed — if it's ever unavailable, the stable production model is used.
-TOPIC_GATE_MODELS = ["openai/gpt-oss-safeguard-20b", "openai/gpt-oss-20b"]
+# Each model has its own separate free per-minute allowance, so when web
+# searches have used up the 20b model's minute, the 120b model can still
+# do the check (it's a tiny request).
+TOPIC_GATE_MODELS = ["openai/gpt-oss-safeguard-20b", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
+
+# Added to the tutor's instructions when the gate couldn't run, so the
+# tutor's own off-task rules become the strict last line of defence.
+GATE_UNCHECKED_NOTE = (
+    "\n=== IMPORTANT: the automatic off-task check could not run for this "
+    "message. Before answering, decide yourself whether it is schoolwork, and "
+    "apply the STAY ON TASK rules strictly. ===\n"
+)
 _gate_cooldown_until = {}  # model -> timestamp; skip a model that just said "busy"
 TOPIC_GATE_CONTEXT_MESSAGES = 6
+# Messages that AREN'T the tutor's answer — errors, limits, the age
+# question, off-task refusals — start with this invisible marker. The chat
+# page shows them, but doesn't save them into the conversation (so the AI
+# never later reads an error as if the tutor had said it) and doesn't
+# count them as a solved problem.
+NOTICE = "\x02"
+
+
+def notice_response(text):
+    def gen():
+        yield NOTICE + text
+    return Response(gen(), mimetype="text/plain")
+
+
 OFF_TASK_REPLY = (
     "That's not something I can help with — I'm only here for schoolwork! "
     "What are you studying right now? 📚"
@@ -1160,6 +1372,7 @@ causes of WW2) are "web": 0. Off-task messages are always "web": 0.
 "what is the population of Brazil right now, for my geography project" -> {"violation": 0, "web": 1, "rationale": "current number"}
 "what did the newest Mars rover find, for science class" -> {"violation": 0, "web": 1, "rationale": "recent event"}
 "what is 8 x 7" -> {"violation": 0, "web": 0, "rationale": "math"}
+"search it up" (after the tutor explained how to pronounce a word) -> {"violation": 0, "web": 1, "rationale": "follow-up asking to look up the school topic"}
 """
 
 _GATE_VERDICT_RE = re.compile(r'"?violation"?\s*[:=]\s*"?([01])')
@@ -1256,8 +1469,8 @@ def topic_gate_check(history, api_key):
         except Exception as e:
             print(f"[ThinkStep] Topic gate error with {gate_model}: {e}")
             continue
-    print("[ThinkStep] Topic gate couldn't decide — letting the message through.")
-    return allow
+    print("[ThinkStep] Topic gate couldn't decide — tutor will check strictly itself.")
+    return {"blocked": False, "web": False, "unchecked": True}
 
 
 # ============================================================
@@ -1282,7 +1495,19 @@ def topic_gate_check(history, api_key):
 # ============================================================
 WEB_RESEARCH_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]
 WEB_NOTES_MAX_CHARS = 2000
-WEB_INDICATOR = "🔎 I checked the web for this.\n\n"
+WEB_INDICATOR = "\n\n🔎 I checked the web for this."
+
+# Phrases from the tutor's "that's not schoolwork" replies. If a reply is a
+# refusal, saying "I checked the web for this" under it makes no sense.
+_REFUSAL_PHRASES = (
+    "here for schoolwork", "not something i help with", "not something i can help with",
+    "i can't help with that", "i can only help with schoolwork",
+)
+
+
+def _looks_like_refusal(text):
+    t = (text or "").lower().replace("’", "'")
+    return any(p in t for p in _REFUSAL_PHRASES)
 
 WEB_RESEARCH_PROMPT = """You are a research helper for a homework tutor for kids.
 Use web search to find the facts needed to help with the student's LATEST
@@ -1291,6 +1516,13 @@ fact, each ending with the source website's name in parentheses, like:
 - Brazil's population is about 213 million (IBGE)
 
 Rules:
+- Work out WHAT to research from the whole conversation. If the latest
+  message is short, like "search it up", "look it up" or "what about the
+  other one", it refers to the topic of the earlier messages — research
+  that topic.
+- Research the SCHOOL meaning of the topic, not products or brands. For
+  example, if the student asked how to say the word "word", research the
+  pronunciation of the English word "word", not Microsoft Word.
 - Facts only. Do not solve homework problems or write the student's work.
 - No links or web addresses.
 - Only include information that is appropriate for children. Skip anything
@@ -1362,6 +1594,11 @@ def add_no_cache_headers(response):
     # or the tunnel's edge caching index.html/app.js is exactly what causes
     # "it works after I refresh but not otherwise" symptoms — the page you're
     # looking at is running old JS even though the server has new code.
+    if request.path.startswith("/static/fonts/") and response.status_code == 200:
+        # ...except font files, which never change: let the browser keep
+        # them for a day so every page doesn't re-download them.
+        response.headers["Cache-Control"] = "public, max-age=86400"
+        return response
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
@@ -1513,7 +1750,29 @@ def admin_stats():
         "totalFeedback": total_feedback,
         "avgRating": avg_rating,
         "totalSafetyFlags": len(flags),
+        "warnings": setup_warnings(),
     })
+
+
+def setup_warnings():
+    """Plain-English problems with how the site is set up, shown at the top
+    of the admin page and printed when the server starts."""
+    warnings = []
+    on_render = bool(os.environ.get("RENDER"))
+    if on_render and STORE.kind != "postgres":
+        warnings.append(
+            "Accounts are being saved on Render's temporary disk, so they're wiped "
+            "every time the site restarts or updates. Set DATABASE_URL on Render "
+            "(see the Neon setup steps).")
+    if email_provider() is None:
+        warnings.append(
+            "Email isn't set up, so parent-approval emails, password resets and "
+            "safety alerts can't be sent. "
+            + ("On Render, set BREVO_API_KEY and EMAIL_FROM."
+               if on_render else "Add email_config.json (Gmail) or BREVO_API_KEY + EMAIL_FROM."))
+    if not _load_groq_api_key():
+        warnings.append("No Groq API key is set, so the AI tutor can't answer. Set GROQ_API_KEY.")
+    return warnings
 
 
 @app.route("/api/admin/accounts")
@@ -1599,6 +1858,12 @@ def submit_feedback():
     if len(name) > 100 or len(review) > 3000:
         return jsonify({"error": "That's a bit too long — please shorten it."}), 400
 
+    # Spam limit — each feedback emails the operator, so cap it per network.
+    wait = _feedback_limiter.hit(visitor_id())
+    if wait:
+        return jsonify({"error": f"Thanks for all the feedback! Please wait {_minutes(wait)} "
+                                 f"before sending more."}), 429
+
     entry = {
         "name": name,
         "stars": stars,
@@ -1677,6 +1942,14 @@ def signup():
     if is_13_or_older and recovery_email and not _looks_like_email(recovery_email):
         return jsonify({"error": "That recovery email doesn't look valid."}), 400
 
+    # Spam limit: only accounts actually created count (typos don't), so a
+    # whole class can still sign up from one school network.
+    wait = _signup_limiter.seconds_until_allowed(visitor_id())
+    if wait:
+        print("[ThinkStep] Signup blocked — too many new accounts from one network.")
+        return jsonify({"error": f"Lots of new accounts have been made from this network recently. "
+                                 f"Please try again in {_minutes(wait)}."}), 429
+
     key = name.strip().lower()
     users = _load_users()
     existing = users.get(key)
@@ -1707,6 +1980,7 @@ def signup():
             user_record["recovery_email"] = recovery_email
         users[key] = user_record
         _save_users(users)
+        _signup_limiter.record(visitor_id())
         session.permanent = remember
         session["user_key"] = key
         print(f"[ThinkStep] New account created: {name} (grade {grade})")
@@ -1718,6 +1992,8 @@ def signup():
     user_record["parent_email"] = parent_email
     users[key] = user_record
     _save_users(users)
+    # also limits how many consent emails one network can make the site send
+    _signup_limiter.record(visitor_id())
 
     token = secrets.token_urlsafe(32)
     tokens = _load_consent_tokens()
@@ -1960,6 +2236,11 @@ def forgot_password():
                     "we've sent a password reset link to it."
     })
 
+    # Spam limit — stops anyone flooding a parent's inbox with reset emails.
+    wait = _reset_email_limiter.hit(visitor_id())
+    if wait:
+        return jsonify({"error": f"Too many reset requests — please try again in {_minutes(wait)}."}), 429
+
     if not key:
         return generic_response
 
@@ -2109,8 +2390,47 @@ def guest_status():
         "used": used,
         "limit": GUEST_QUESTION_LIMIT,
         "remaining": max(0, GUEST_QUESTION_LIMIT - used),
+        # None = hasn't answered the age question yet; "ok"; or "under13"
+        "ageStatus": session.get("guest_age"),
     })
     return attach_guest_cookie_if_new(resp, guest_id, is_new)
+
+
+# ============================================================
+# Guest age check
+# Guests used to be able to chat with no age question at all, which
+# skipped the under-13 parent-consent step that accounts go through.
+# Now a guest is asked their age once, neutrally (a plain "how old are
+# you?", with nothing hinting at a "right" answer). Under 13 means no
+# guest chatting — they're pointed to signing up with a parent's OK.
+#
+# The answer is remembered in the signed session cookie for 30 days and
+# an "under 13" answer can't be changed by asking again — otherwise a kid
+# could just press back and type a bigger number. Only the result is kept
+# ("ok" / "under13"), never the age itself.
+# ============================================================
+GUEST_AGE_MIN, GUEST_AGE_MAX = 4, 120
+
+
+@app.route("/api/guest-age", methods=["POST"])
+def guest_age():
+    if get_current_user():
+        return jsonify({"status": "ok"})
+    current = session.get("guest_age")
+    if current == "under13":
+        return jsonify({"status": "under13"})
+    data = request.get_json(force=True) or {}
+    try:
+        age = int(data.get("age"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Please type your age as a number."}), 400
+    if age < GUEST_AGE_MIN or age > GUEST_AGE_MAX:
+        return jsonify({"error": "Please type your real age."}), 400
+    status = "ok" if age >= 13 else "under13"
+    session.permanent = True
+    session["guest_age"] = status
+    print(f"[ThinkStep] Guest age check: {status}")
+    return jsonify({"status": status})
 
 
 
@@ -2134,21 +2454,49 @@ def chat():
             return attach_guest_cookie_if_new(resp, guest_id, guest_id_is_new)
         return resp
 
-    # Guests get a lifetime total of GUEST_QUESTION_LIMIT questions before
-    # they need to make a free account. Accounts have no question limit.
+    visitor = visitor_id()
+
     if not user:
+        # Guests must answer the age question first (enforced here too, not
+        # just on the page, so it can't be skipped by calling the API).
+        age_status = session.get("guest_age")
+        if age_status == "under13":
+            return with_guest_cookie(notice_response(
+                "Kids under 13 need a parent's OK to use ThinkStep. Ask a parent or "
+                "guardian to help you make a free account — it only takes a minute! 🙂"))
+        if age_status != "ok":
+            return with_guest_cookie(notice_response(
+                "Before we start, please answer the quick question about your age."))
+
+        # Guests get a lifetime total of GUEST_QUESTION_LIMIT questions before
+        # they need to make a free account. Accounts have no question limit.
         used = guest_questions_used(guest_id)
         if used >= GUEST_QUESTION_LIMIT:
-            def generate_guest_limit():
-                yield (
-                    f"You've used all {GUEST_QUESTION_LIMIT} of your free questions! 🎉 "
-                    f"Create a free ThinkStep account (just a name, grade, and password) "
-                    f"in the sidebar to keep learning with no limit."
-                )
             print(f"[ThinkStep] Guest {guest_id} hit the {GUEST_QUESTION_LIMIT}-question limit — blocked.")
-            return with_guest_cookie(Response(generate_guest_limit(), mimetype="text/plain"))
+            return with_guest_cookie(notice_response(
+                f"You've used all {GUEST_QUESTION_LIMIT} of your free questions! 🎉 "
+                f"Create a free ThinkStep account (just a name, grade, and password) "
+                f"in the sidebar to keep learning with no limit."))
+        # ...and per network per day, so clearing cookies doesn't reset it.
+        if guest_questions_from_visitor_today(visitor) >= GUEST_DAILY_LIMIT_PER_VISITOR:
+            print("[ThinkStep] Guest questions from one network hit today's limit — blocked.")
+            return with_guest_cookie(notice_response(
+                "Lots of free questions have been asked from this network today! "
+                "Create a free ThinkStep account (just a name, grade, and password) "
+                "in the sidebar to keep learning."))
 
     account_key = session.get("user_key") if user else None
+
+    # Speed limits, for everyone: stops a script from flooding the site and
+    # using up the free AI allowance that every student shares.
+    wait = _chat_burst_limiter.hit(f"acct:{account_key}" if user else f"guest:{guest_id}")
+    if not wait:
+        wait = _chat_visitor_limiter.hit(visitor)
+    if wait:
+        print(f"[ThinkStep] Chat speed limit hit ({account_key or 'guest'}) — asked to wait {wait}s.")
+        return with_guest_cookie(notice_response(
+            f"Whoa, that's a lot of questions really fast! Take a breather and try "
+            f"again in {_minutes(wait) if wait >= 60 else f'{wait} seconds'}."))
 
     print(f"[ThinkStep] Sending this request to Groq using model: {model} "
           f"(user: {account_key or 'guest ' + str(guest_id)})")
@@ -2261,11 +2609,14 @@ def chat():
     # student any of their free questions or daily smartest-model uses.
     gate = {"blocked": False, "web": False} if safety_flagged else topic_gate_check(history, groq_api_key)
     use_web = gate["web"]
+    if gate.get("unchecked"):
+        payload["messages"][0] = {"role": "system",
+                                  "content": payload["messages"][0]["content"] + GATE_UNCHECKED_NOTE}
     if gate["blocked"]:
         print(f"[ThinkStep] OFF-TASK blocked — {who_label}: {last_user_msg[:120]!r}")
 
         def generate_off_task():
-            yield OFF_TASK_REPLY
+            yield NOTICE + OFF_TASK_REPLY
 
         return with_guest_cookie(Response(generate_off_task(), mimetype="text/plain"))
 
@@ -2287,7 +2638,7 @@ def chat():
         def worker():
             if not groq_api_key:
                 q.put(
-                    "\n\n[ThinkStep isn't connected to an AI provider yet. "
+                    NOTICE + "\n\n[ThinkStep isn't connected to an AI provider yet. "
                     "Whoever runs this app needs to add a Groq API key — "
                     "see the note at the top of app.py.]"
                 )
@@ -2307,7 +2658,8 @@ def chat():
                         + notes
                         + "\n=== END WEB NOTES ===\n",
                     }
-                    q.put(WEB_INDICATOR)
+            used_web_notes = bool(use_web and notes)
+            answer_parts = []  # what the student actually sees, to check at the end
             # Every TUTOR_ATTEMPTS step on the chosen model, in order. The
             # rate-limit fallback model is only added if Groq says "busy".
             ladder = [(model, extra) for extra in TUTOR_ATTEMPTS]
@@ -2362,6 +2714,7 @@ def chat():
                             content = (choices[0].get("delta") or {}).get("content") or ""
                             if content:
                                 q.put(content)
+                                answer_parts.append(content)
                                 streamed_any = True
                             finish = choices[0].get("finish_reason") or finish
                     _log_groq_usage(attempt_model, label, usage)
@@ -2371,23 +2724,27 @@ def chat():
                         continue
                     if streamed_any and finish == "length":
                         q.put("\n\n(I ran out of room there — say \"keep going\" and I'll finish!)")
+                    # "🔎 I checked the web" goes at the END, and only when
+                    # the tutor actually helped — never under a refusal.
+                    if used_web_notes and streamed_any and not _looks_like_refusal("".join(answer_parts)):
+                        q.put(WEB_INDICATOR)
                     result["succeeded"] = streamed_any
                     result["model_used"] = attempt_model
                     break
             except requests.exceptions.ConnectionError:
-                q.put("\n\n[Couldn't reach Groq. Check your internet connection and try again.]")
+                q.put(NOTICE + "\n\n[Couldn't reach Groq. Check your internet connection and try again.]")
             except requests.exceptions.ReadTimeout:
-                q.put("\n\n[Groq took too long to respond. Please try asking again.]")
+                q.put(NOTICE + "\n\n[Groq took too long to respond. Please try asking again.]")
             except requests.exceptions.HTTPError as e:
                 status = e.response.status_code if e.response is not None else None
                 if status == 401:
-                    q.put("\n\n[ThinkStep's Groq API key looks invalid or expired — whoever runs this app needs to check groq_config.json.]")
+                    q.put(NOTICE + "\n\n[ThinkStep's Groq API key looks invalid or expired — whoever runs this app needs to check groq_config.json.]")
                 elif status == 429:
-                    q.put("\n\n[Groq's free usage limit was hit for a moment — please try again in a bit.]")
+                    q.put(NOTICE + "\n\n[Groq's free usage limit was hit for a moment — please try again in a bit.]")
                 else:
-                    q.put(f"\n\n[Error talking to Groq: {e}]")
+                    q.put(NOTICE + f"\n\n[Error talking to Groq: {e}]")
             except Exception as e:
-                q.put(f"\n\n[Error talking to Groq: {e}]")
+                q.put(NOTICE + f"\n\n[Error talking to Groq: {e}]")
             finally:
                 q.put(SENTINEL)
 
@@ -2410,10 +2767,27 @@ def chat():
         # a timeout, connection error, or crash shouldn't cost them anything.
         # (Accounts have no question limit, so there's nothing to count.)
         if succeeded and not user:
-            record_guest_usage(guest_id)
+            record_guest_usage(guest_id, visitor)
             print(f"[ThinkStep] Guest {guest_id} usage: {guest_questions_used(guest_id)}/{GUEST_QUESTION_LIMIT}")
 
     return with_guest_cookie(Response(generate(), mimetype="text/plain"))
+
+
+_server_started = False
+
+
+def on_server_start():
+    """Things to do once when the real server starts (not in tests): start
+    the backup thread and print any setup problems to the log. Called by
+    `python3 app.py` below, and by gunicorn.conf.py when running on Render
+    with gunicorn — which never runs the __main__ block."""
+    global _server_started
+    if _server_started:
+        return
+    _server_started = True
+    start_backup_thread()
+    for w in setup_warnings():
+        print(f"[ThinkStep] SETUP WARNING: {w}")
 
 
 if __name__ == "__main__":
@@ -2427,7 +2801,7 @@ if __name__ == "__main__":
     #   THINKSTEP_DEBUG=1 python3 app.py
     debug_mode = _dev_mode
     print(f"ThinkStep running at http://localhost:{port}" + (" [DEBUG MODE — local dev only!]" if debug_mode else ""))
-    start_backup_thread()
+    on_server_start()
     # threaded=True matters here: /api/chat streams for as long as Groq
     # takes to respond. Without threading, the single-worker dev server
     # can't serve *any* other request — health checks, the model list,
