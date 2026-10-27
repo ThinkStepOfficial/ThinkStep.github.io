@@ -179,6 +179,11 @@
     border: 1px solid #f3c6c1; border-radius: 6px; padding: 2px 6px;
   }
   .empty-note { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  #setupWarnings { display: none; margin-top: 22px; background: #fff4e5; border: 1px solid #f0b46b;
+    border-radius: 14px; padding: 14px 18px; color: #7a4a00; font-size: 14px; }
+  #setupWarnings.show { display: block; }
+  #setupWarnings h2 { margin: 0 0 6px; font-size: 15px; }
+  #setupWarnings li { margin: 4px 0; }
   .refresh-note { text-align: center; font-size: 11.5px; color: var(--muted); margin-top: 16px; }
   .stat-box.alert .num { color: #c0392b; }
   .flag-row {
@@ -243,6 +248,8 @@
       <h2>Signed-in students online</h2>
       <div id="accountsList"><div class="empty-note">Loading…</div></div>
     </div>
+
+    <div id="setupWarnings"><h2>⚠️ Something needs setting up</h2><ul id="setupWarningsList"></ul></div>
 
     <div class="stat-row" style="margin-top:22px;">
       <div class="stat-box">
@@ -370,6 +377,9 @@ async function fetchStats() {
     avgRatingEl.textContent = data.avgRating != null ? data.avgRating : '–';
     totalSafetyFlagsEl.textContent = data.totalSafetyFlags;
     safetyStatBox.classList.toggle('alert', data.totalSafetyFlags > 0);
+    const warnings = data.warnings || [];
+    document.getElementById('setupWarningsList').innerHTML = warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('');
+    document.getElementById('setupWarnings').classList.toggle('show', warnings.length > 0);
   } catch {}
 }
 

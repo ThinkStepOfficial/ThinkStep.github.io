@@ -1,0 +1,4 @@
+flask
+requests
+psycopg[binary,pool]>=3.2
+gunicorn>=22

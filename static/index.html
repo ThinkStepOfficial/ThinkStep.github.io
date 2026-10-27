@@ -577,6 +577,19 @@
     padding: 16px;
   }
   #forgotPasswordOverlay.open { display: flex; }
+  #ageOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 30, 60, 0.45);
+    z-index: 102;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  #ageOverlay.open { display: flex; }
+  /* messages from ThinkStep itself (limits, errors) rather than the tutor */
+  .msg.ai.notice { background: #fff8ec; border-color: #f5d6a1; color: #6b4a12; }
   .link-btn {
     background: none;
     border: none;
@@ -1003,6 +1016,27 @@
   </div>
 </div>
 
+<div id="ageOverlay">
+  <div class="account-modal">
+    <button type="button" class="close-btn" id="ageClose">✕</button>
+    <div id="ageAsk">
+      <h2>Quick question before we start</h2>
+      <div class="sub">How old are you?</div>
+      <form id="ageForm">
+        <label for="ageInput">Age</label>
+        <input id="ageInput" type="number" inputmode="numeric" min="1" max="120" required />
+        <div class="error-msg" id="ageError"></div>
+        <button type="submit" class="submit-btn" id="ageSubmitBtn">Continue</button>
+      </form>
+    </div>
+    <div id="ageUnder13" style="display:none;">
+      <h2>Ask a parent to help 🙂</h2>
+      <div class="sub">Kids under 13 need a parent or guardian's OK to use ThinkStep. Ask them to help you make a free account — it only takes a minute, and we'll email them to say yes.</div>
+      <button type="button" class="submit-btn" id="ageSignupBtn">Sign up with a parent</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const chat = document.getElementById('chat');
 const form = document.getElementById('form');
@@ -1073,6 +1107,7 @@ renderFormulaSheet('');
 
 /* ---------- Account system ---------- */
 let currentUser = null; // { name, grade } or null if guest
+let guestAgeStatus = null; // guests: null (not asked yet), 'ok', or 'under13'
 
 const accountStatusEl = document.getElementById('accountStatus');
 const accountButtonsEl = document.getElementById('accountButtons');
@@ -1241,6 +1276,7 @@ accountForm.addEventListener('submit', async (e) => {
       return;
     }
     currentUser = { name: result.name, grade: result.grade || '' };
+    switchStorageOwner(currentUser);
     closeAccountModal();
     renderAccountStatus();
     renderFormulaSheet(currentUser.grade);
@@ -1257,6 +1293,7 @@ async function logoutUser() {
     await fetch('/api/logout', { method: 'POST' });
   } catch {}
   currentUser = null;
+  switchStorageOwner(null);  // the next person can't see this kid's chats
   renderAccountStatus();
   renderFormulaSheet('');
 }
@@ -1290,6 +1327,11 @@ forgotPasswordForm.addEventListener('submit', async (e) => {
       body: JSON.stringify({ name: fpName.value.trim() }),
     });
     const result = await res.json();
+    if (!res.ok) {  // e.g. too many reset requests in a row
+      forgotPasswordError.textContent = result.error || 'Something went wrong — please try again.';
+      forgotPasswordError.classList.add('show');
+      return;
+    }
     forgotPasswordSuccess.textContent = result.message || "If that account exists and has a recovery email on file, we've sent a reset link to it.";
     forgotPasswordSuccess.style.display = 'block';
     forgotPasswordForm.querySelector('#fpName').style.display = 'none';
@@ -1319,7 +1361,9 @@ async function deleteAccountFlow() {
       alert(result.error || 'Something went wrong deleting the account.');
       return;
     }
+    clearPersonalData(ownerFor(currentUser));  // wipe this account's chats from this computer too
     currentUser = null;
+    switchStorageOwner(null);
     renderAccountStatus();
     renderFormulaSheet('');
     alert('Account deleted.');
@@ -1356,6 +1400,7 @@ async function refreshGuestStatus() {
   try {
     const res = await fetch('/api/guest-status', { cache: 'no-store' });
     const g = await res.json();
+    guestAgeStatus = g.ageStatus || null;
     if (currentUser) return; // logged in meanwhile
     const pct = Math.max(0, Math.min(100, (g.remaining / g.limit) * 100));
     accountStatusEl.innerHTML = `
@@ -1376,39 +1421,105 @@ async function initAccount() {
       currentUser = { name: m.name, grade: m.grade || '' };
     }
   } catch {}
+  switchStorageOwner(currentUser);
   renderAccountStatus();
   renderFormulaSheet(currentUser ? currentUser.grade : '');
 }
 
-/* ---------- Chat session storage ---------- */
-const STORAGE_KEY = 'thinkstep_chats';
-const ACTIVE_KEY = 'thinkstep_active';
+/* ---------- Per-person storage ----------
+   Chats, notes and progress belong to ONE person. On a shared computer
+   (school, library, brothers and sisters) the next kid must never see them:
+   - signed in: saved in this browser under that account only, so a
+     different kid signing in on the same computer has their own space;
+   - guest: kept only until the browser is closed (sessionStorage).
+   Logging out switches away straight away; deleting an account also wipes
+   what that account had saved on this computer. */
+const LEGACY_KEYS = {
+  chats: 'thinkstep_chats', active: 'thinkstep_active', last_date: 'thinkstep_last_date',
+  streak: 'thinkstep_streak', problems: 'thinkstep_problems', notes: 'thinkstep_notes',
+};
+let storageOwner = 'guest';
+function hashName(str) {  // short one-way tag, so the account name isn't stored as a key
+  let h = 0x811c9dc5;
+  for (const ch of str) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16);
+}
+function ownerFor(user) {
+  return user ? 'u_' + hashName(user.name.trim().toLowerCase()) : 'guest';
+}
+function personalStore(owner = storageOwner) {
+  return owner === 'guest' ? sessionStorage : localStorage;
+}
+function pGet(k) {
+  try { return personalStore().getItem(`thinkstep:${storageOwner}:${k}`); } catch { return null; }
+}
+function pSet(k, v) {
+  try { personalStore().setItem(`thinkstep:${storageOwner}:${k}`, v); } catch {}
+}
+function clearPersonalData(owner) {
+  try {
+    const st = personalStore(owner);
+    const prefix = `thinkstep:${owner}:`;
+    for (let i = st.length - 1; i >= 0; i--) {
+      const k = st.key(i);
+      if (k && k.startsWith(prefix)) st.removeItem(k);
+    }
+  } catch {}
+}
+function migrateLegacyStorage() {
+  // One time only: before this change everything sat in one shared spot.
+  // Hand it to whoever is using this browser now, then delete the shared copy.
+  for (const [k, legacyKey] of Object.entries(LEGACY_KEYS)) {
+    let v = null;
+    try { v = localStorage.getItem(legacyKey); } catch {}
+    if (v !== null) {
+      if (pGet(k) === null) pSet(k, v);
+      try { localStorage.removeItem(legacyKey); } catch {}
+    }
+  }
+}
 
 function loadChats() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+    return JSON.parse(pGet('chats')) || [];
   } catch { return []; }
 }
 function saveChats(chats) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+  pSet('chats', JSON.stringify(chats));
 }
 function newChatObj() {
   return { id: 'c' + Date.now(), title: 'New chat', messages: [] };
 }
 
-let chats = loadChats();
-let activeId = localStorage.getItem(ACTIVE_KEY);
-
-if (chats.length === 0) {
-  const c = newChatObj();
-  chats.push(c);
-  activeId = c.id;
-  saveChats(chats);
-  localStorage.setItem(ACTIVE_KEY, activeId);
+let chats = [];
+let activeId = null;
+function loadPersonalData() {
+  chats = loadChats();
+  activeId = pGet('active');
+  if (chats.length === 0) {
+    const c = newChatObj();
+    chats.push(c);
+    activeId = c.id;
+    saveChats(chats);
+    pSet('active', activeId);
+  }
+  if (!chats.find(c => c.id === activeId)) {
+    activeId = chats[0].id;
+    pSet('active', activeId);
+  }
 }
-if (!chats.find(c => c.id === activeId)) {
-  activeId = chats[0].id;
-  localStorage.setItem(ACTIVE_KEY, activeId);
+loadPersonalData();
+
+// Called whenever who's using ThinkStep changes: page load, log in, log
+// out, account deleted.
+function switchStorageOwner(user) {
+  storageOwner = ownerFor(user);
+  migrateLegacyStorage();
+  loadPersonalData();
+  notesEl.value = pGet('notes') || '';
+  renderChatList();
+  renderMessages();
+  renderProgress();
 }
 
 function getActive() {
@@ -1423,7 +1534,7 @@ function renderChatList() {
     li.innerHTML = `<span class="title">${escapeHtml(c.title)}</span><span class="del" title="Delete">✕</span>`;
     li.querySelector('.title').addEventListener('click', () => {
       activeId = c.id;
-      localStorage.setItem(ACTIVE_KEY, activeId);
+      pSet('active', activeId);
       renderChatList();
       renderMessages();
       if (typeof closeDrawers === 'function') closeDrawers();
@@ -1437,7 +1548,7 @@ function renderChatList() {
       }
       if (activeId === c.id) activeId = chats[chats.length - 1].id;
       saveChats(chats);
-      localStorage.setItem(ACTIVE_KEY, activeId);
+      pSet('active', activeId);
       renderChatList();
       renderMessages();
     });
@@ -1472,10 +1583,13 @@ const MATH_SYMBOLS = [
 ];
 
 function tidyMath(s) {
-  if (!s || !/[\\${}^]|\*\*/.test(s)) {
+  if (!s || !/[\\${}^【]|\*\*/.test(s)) {
     return s; // fast path — nothing math-y or markdown-y in here
   }
   let t = s;
+
+  // web-search citation markers like 【2†L6-L10】 — meaningless to a kid
+  t = t.replace(/【[^】]*】/g, '');
 
   // Strip math delimiters FIRST, while the LaTeX inside is still
   // recognisable. $$...$$ is always math; $...$ only counts when it really
@@ -1544,7 +1658,7 @@ newChatBtn.addEventListener('click', () => {
   chats.push(c);
   activeId = c.id;
   saveChats(chats);
-  localStorage.setItem(ACTIVE_KEY, activeId);
+  pSet('active', activeId);
   renderChatList();
   renderMessages();
   if (typeof closeDrawers === 'function') closeDrawers();
@@ -1569,8 +1683,8 @@ function daysBetween(dateStrA, dateStrB) {
 }
 function updateStreak() {
   const today = localDateStr(new Date());
-  const lastDate = localStorage.getItem('thinkstep_last_date');
-  let streak = parseInt(localStorage.getItem('thinkstep_streak') || '0', 10);
+  const lastDate = pGet('last_date');
+  let streak = parseInt(pGet('streak') || '0', 10);
 
   if (lastDate !== today) {
     if (lastDate) {
@@ -1579,21 +1693,21 @@ function updateStreak() {
     } else {
       streak = 1; // very first visit ever
     }
-    localStorage.setItem('thinkstep_last_date', today);
-    localStorage.setItem('thinkstep_streak', streak);
+    pSet('last_date', today);
+    pSet('streak', String(streak));
   }
   // Note: if lastDate === today, we don't touch the streak at all —
   // reloading or revisiting later the same day never changes it.
   document.getElementById('streakNum').textContent = streak;
 }
 function bumpProblemsCount() {
-  const n = parseInt(localStorage.getItem('thinkstep_problems') || '0', 10) + 1;
-  localStorage.setItem('thinkstep_problems', n);
+  const n = parseInt(pGet('problems') || '0', 10) + 1;
+  pSet('problems', String(n));
   document.getElementById('problemsNum').textContent = n;
 }
 function renderProgress() {
   updateStreak();
-  document.getElementById('problemsNum').textContent = localStorage.getItem('thinkstep_problems') || '0';
+  document.getElementById('problemsNum').textContent = pGet('problems') || '0';
 }
 
 /* ---------- Export summary ---------- */
@@ -1770,7 +1884,7 @@ async function sendMessage(text) {
     if (!res.ok || !contentType.includes('text/plain')) {
       clearTimeout(slowNoteTimer);
       aiDiv.textContent = res.status === 524
-        ? "The connection timed out before ThinkStep could answer. Try again in a bit, or pick the other helper from the dropdown."
+        ? "The connection timed out before ThinkStep could answer. Please try again in a bit."
         : `Something went wrong reaching ThinkStep (status ${res.status}). Try again in a moment.`;
       checkConnection();
       return;
@@ -1789,20 +1903,35 @@ async function sendMessage(text) {
       if (!clean) continue; // pure heartbeat chunk — keep showing the typing dots
       full += clean;
       clearTimeout(slowNoteTimer);
-      aiDiv.textContent = tidyMath(full);
+      aiDiv.textContent = tidyMath(full.replace(/\x02/g, ''));
       chat.scrollTop = chat.scrollHeight;
     }
     clearTimeout(slowNoteTimer);
+    // \x02 marks a message from ThinkStep itself (an error, a limit, the
+    // age question, an off-task refusal) rather than the tutor's answer.
+    // Those are shown, but never saved into the conversation — or the AI
+    // would later read them as if the tutor had said them — and never
+    // counted as a solved problem.
+    const noticeAt = full.indexOf('\x02');
+    const answer = (noticeAt === -1 ? full : full.slice(0, noticeAt)).trim();
+    if (noticeAt !== -1) aiDiv.classList.toggle('notice', !answer);
     if (!full) {
       aiDiv.textContent = "Hmm, no response came through — try asking again.";
-    } else {
-      active.messages.push({ role: 'assistant', content: full });
+    } else if (answer) {
+      active.messages.push({ role: 'assistant', content: answer });
       saveChats(chats);
-      // Only counts as a "question asked" once we actually got a response —
-      // a failed/errored request (server down, network hiccup) shouldn't
-      // bump the streak stat.
       bumpProblemsCount();
       if (!currentUser) refreshGuestStatus(); // keep the "X free questions left" count live
+    } else {
+      // Nothing was really answered: take the question back out of the saved
+      // chat too, so asking again doesn't leave it in there twice.
+      const last = active.messages[active.messages.length - 1];
+      if (last && last.role === 'user' && last.content === text) active.messages.pop();
+      saveChats(chats);
+      if (!currentUser) {
+        refreshGuestStatus();
+        if (full.includes('about your age') && guestAgeStatus !== 'ok') openAgeModal();
+      }
     }
   } catch (err) {
     clearTimeout(slowNoteTimer);
@@ -1818,8 +1947,68 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = promptEl.value.trim();
   if (!text) return;
+  if (!currentUser && guestAgeStatus === null) await refreshGuestStatus();  // answer may already be saved
+  if (!currentUser && guestAgeStatus !== 'ok') {
+    openAgeModal(text);  // guests answer the age question once, first
+    return;
+  }
   promptEl.value = '';
   await sendMessage(text);
+});
+
+/* ---------- Guest age question ----------
+   Asked once, neutrally ("How old are you?" — nothing hints at a right
+   answer). The server remembers the answer, and an under-13 answer can't
+   be changed by asking again. */
+const ageOverlay = document.getElementById('ageOverlay');
+const ageForm = document.getElementById('ageForm');
+const ageInput = document.getElementById('ageInput');
+const ageError = document.getElementById('ageError');
+let ageTextWaiting = null;
+function showAgeStep(under13) {
+  document.getElementById('ageAsk').style.display = under13 ? 'none' : 'block';
+  document.getElementById('ageUnder13').style.display = under13 ? 'block' : 'none';
+}
+function openAgeModal(textWaiting) {
+  ageTextWaiting = textWaiting || null;
+  ageError.classList.remove('show');
+  ageForm.reset();
+  showAgeStep(guestAgeStatus === 'under13');
+  ageOverlay.classList.add('open');
+  if (guestAgeStatus !== 'under13') setTimeout(() => ageInput.focus(), 50);
+}
+function closeAgeModal() { ageOverlay.classList.remove('open'); }
+document.getElementById('ageClose').addEventListener('click', closeAgeModal);
+document.getElementById('ageSignupBtn').addEventListener('click', () => {
+  closeAgeModal();
+  openAccountModal('signup');
+});
+ageForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  ageError.classList.remove('show');
+  try {
+    const res = await fetch('/api/guest-age', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ age: ageInput.value }),
+    });
+    const r = await res.json();
+    if (!res.ok) {
+      ageError.textContent = r.error || 'Please type your age as a number.';
+      ageError.classList.add('show');
+      return;
+    }
+    guestAgeStatus = r.status;
+    if (r.status === 'under13') { showAgeStep(true); return; }
+    closeAgeModal();
+    if (ageTextWaiting) {
+      promptEl.value = '';
+      const t = ageTextWaiting; ageTextWaiting = null;
+      await sendMessage(t);
+    }
+  } catch {
+    ageError.textContent = "Couldn't reach the server — try again.";
+    ageError.classList.add('show');
+  }
 });
 
 explainBtn.addEventListener('click', async () => {
@@ -1928,9 +2117,9 @@ timerReset.addEventListener('click', () => {
 
 /* ---------- Notes ---------- */
 const notesEl = document.getElementById('notes');
-notesEl.value = localStorage.getItem('thinkstep_notes') || '';
+notesEl.value = pGet('notes') || '';
 notesEl.addEventListener('input', () => {
-  localStorage.setItem('thinkstep_notes', notesEl.value);
+  pSet('notes', notesEl.value);
 });
 
 /* ---------- Mobile / tablet nav toggles ---------- */
