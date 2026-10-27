@@ -967,7 +967,10 @@ sounds.
 
 You HELP with: math, reading, writing, spelling, grammar, science, history,
 geography, languages, study skills, understanding a homework question, and
-checking work the student has done.
+checking work the student has done. Follow-up requests about the schoolwork
+you're already discussing are always on-task too — "look it up",
+"search it up", "give me an example", "explain it another way",
+"I don't get it".
 
 You REFUSE everything else, including: recipes, cooking, baking, crafts,
 DIY projects, and other everyday how-to questions (unless the student says
@@ -1038,6 +1041,22 @@ Your job is to help kids LEARN, not to hand them answers. Follow these rules:
    - If they say "the problem from before" or "that other question", look
      back in the conversation and find it rather than asking them to repeat
      it.
+10. WEB NOTES. Sometimes a "WEB NOTES" section appears at the end of these
+   instructions: facts looked up online for this question. When it does:
+   - Use them to make sure your facts are correct and up to date.
+   - Still teach the usual way. Don't paste the notes or list the facts;
+     guide the student to the answer with hints and questions.
+   - You can name a source when it helps ("According to NASA, ..."), but
+     never give links or web addresses.
+   - If a note seems wrong, unsafe, not right for a child, or about a
+     different topic than the one you're discussing (for example, notes
+     about Microsoft Word when the student asked how to say the word
+     "word"), ignore that note — and NEVER refuse the student because of
+     what's in the notes. Decide on-task vs off-task from the conversation
+     alone.
+   - If a student asks you to "look it up" or "search it", that's a normal
+     schoolwork request. Use the WEB NOTES if there are any; if there are
+     none, help with what you already know.
 
 How to write math (very important — the chat shows your reply as plain
 text, so any special math formatting shows up as confusing symbols):
@@ -1100,8 +1119,15 @@ TOPIC_GATE_POLICY = """# ThinkStep Schoolwork-Only Policy
 You are the gatekeeper for ThinkStep, a homework tutor for kids. Decide if
 the student's LATEST message may be passed to the tutor. Earlier messages
 are context only. Be strict: ThinkStep is for school learning, nothing
-else. Reply with JSON only:
-{"violation": 0 or 1, "rationale": "a few words"}
+else. Also decide whether answering well needs a WEB SEARCH. Reply with
+JSON only:
+{"violation": 0 or 1, "web": 0 or 1, "rationale": "a few words"}
+
+"web" is 1 ONLY when a good answer needs facts the tutor may not reliably
+know: recent or current events, today's numbers (populations, records,
+prices), or a specific named thing it might misremember. Normal school
+topics the tutor already knows (math, grammar, how volcanoes work, the
+causes of WW2) are "web": 0. Off-task messages are always "web": 0.
 
 ## DEFINITIONS
 - School subject: math, reading, writing, spelling, grammar, science,
@@ -1142,9 +1168,21 @@ else. Reply with JSON only:
 "write about my summer for english class" -> {"violation": 0, "rationale": "assignment"}
 "what's your favorite color" -> {"violation": 1, "rationale": "about the AI"}
 "hi" -> {"violation": 0, "rationale": "greeting"}
+"what is the population of Brazil right now, for my geography project" -> {"violation": 0, "web": 1, "rationale": "current number"}
+"what did the newest Mars rover find, for science class" -> {"violation": 0, "web": 1, "rationale": "recent event"}
+"what is 8 x 7" -> {"violation": 0, "web": 0, "rationale": "math"}
+"search it up" (after the tutor explained how to pronounce a word) -> {"violation": 0, "web": 1, "rationale": "follow-up asking to look up the school topic"}
 """
 
 _GATE_VERDICT_RE = re.compile(r'"?violation"?\s*[:=]\s*"?([01])')
+_GATE_WEB_RE = re.compile(r'"?web"?\s*[:=]\s*"?([01])')
+
+
+def _parse_gate_web(text):
+    """True only if the gate clearly said this question needs a web search.
+    Anything missing or unreadable means no search — the safe default."""
+    m = _GATE_WEB_RE.search(text or "")
+    return bool(m) and m.group(1) == "1"
 
 
 def _parse_gate_verdict(text):
@@ -1160,7 +1198,7 @@ def _parse_gate_verdict(text):
     return None
 
 
-def _format_gate_transcript(history):
+def _format_gate_transcript(history, latest_label="LATEST STUDENT MESSAGE TO CLASSIFY"):
     recent = history[-TOPIC_GATE_CONTEXT_MESSAGES:]
     lines = []
     for m in recent[:-1]:
@@ -1169,14 +1207,24 @@ def _format_gate_transcript(history):
     latest = str(recent[-1].get("content", ""))[:1500] if recent else ""
     context = "\n".join(lines) if lines else "(no earlier messages)"
     return (f"EARLIER IN THE CHAT (context only):\n{context}\n\n"
-            f"LATEST STUDENT MESSAGE TO CLASSIFY:\n{latest}")
+            f"{latest_label}:\n{latest}")
 
 
 def topic_gate_blocks(history, api_key):
     """Returns True if the latest student message is off-task and should be
     blocked. Fails open (returns False) if the check can't be completed."""
+    return topic_gate_check(history, api_key)["blocked"]
+
+
+def topic_gate_check(history, api_key):
+    """One quick check per question, two answers:
+      blocked — off-task, so the tutor never sees it
+      web     — a web search would help answer it well
+    Fails open: if the check can't be completed, the question is allowed
+    and no web search is done."""
+    allow = {"blocked": False, "web": False}
     if not api_key or not history:
-        return False
+        return allow
     transcript = _format_gate_transcript(history)
     headers = {"Authorization": f"Bearer {api_key}"}
     now = datetime.now(timezone.utc).timestamp()
@@ -1216,12 +1264,124 @@ def topic_gate_blocks(history, api_key):
             if verdict is None:
                 print(f"[ThinkStep] Topic gate: unreadable verdict from {gate_model}: {content[:120]!r}")
                 continue
-            return verdict
+            return {"blocked": verdict, "web": (not verdict) and _parse_gate_web(content)}
         except Exception as e:
             print(f"[ThinkStep] Topic gate error with {gate_model}: {e}")
             continue
     print("[ThinkStep] Topic gate couldn't decide — letting the message through.")
-    return False
+    return allow
+
+
+# ============================================================
+# Web research — lets the tutor check facts online.
+#
+# How it works: when the gate says a question needs the web (current
+# events, today's numbers, specific facts), a separate hidden "research
+# helper" call uses Groq's built-in browser search and writes short,
+# kid-appropriate fact notes. The tutor then reads those notes privately
+# and still teaches the usual way — hints and questions.
+#
+# Why not let the tutor search directly: Groq returns raw web snippets
+# mixed into the reply text. In a kids' app, a child must never see
+# unfiltered text from random websites — they only ever see the tutor's
+# own reply.
+#
+# Privacy: the search is run by Exa (Groq's search partner), so only
+# flagged questions are searched, and the student's name, grade and the
+# rest of their details are never sent — only the last few chat lines.
+# Fails open: if search is unavailable (e.g. not included in the free
+# plan), too large, or busy, the tutor simply answers without notes.
+# ============================================================
+WEB_RESEARCH_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]
+WEB_NOTES_MAX_CHARS = 2000
+WEB_INDICATOR = "\n\n🔎 I checked the web for this."
+
+# Phrases from the tutor's "that's not schoolwork" replies. If a reply is a
+# refusal, saying "I checked the web for this" under it makes no sense.
+_REFUSAL_PHRASES = (
+    "here for schoolwork", "not something i help with", "not something i can help with",
+    "i can't help with that", "i can only help with schoolwork",
+)
+
+
+def _looks_like_refusal(text):
+    t = (text or "").lower().replace("’", "'")
+    return any(p in t for p in _REFUSAL_PHRASES)
+
+WEB_RESEARCH_PROMPT = """You are a research helper for a homework tutor for kids.
+Use web search to find the facts needed to help with the student's LATEST
+question. Then reply with short plain-text notes: at most 8 lines, each one
+fact, each ending with the source website's name in parentheses, like:
+- Brazil's population is about 213 million (IBGE)
+
+Rules:
+- Work out WHAT to research from the whole conversation. If the latest
+  message is short, like "search it up", "look it up" or "what about the
+  other one", it refers to the topic of the earlier messages — research
+  that topic.
+- Research the SCHOOL meaning of the topic, not products or brands. For
+  example, if the student asked how to say the word "word", research the
+  pronunciation of the English word "word", not Microsoft Word.
+- Facts only. Do not solve homework problems or write the student's work.
+- No links or web addresses.
+- Only include information that is appropriate for children. Skip anything
+  violent, sexual, hateful, or otherwise unsuitable.
+- If you could not find anything reliable, reply exactly: NO NOTES"""
+
+
+def _clean_web_notes(text):
+    """Tidy the research helper's notes before the tutor sees them, or None
+    if there's nothing usable."""
+    if not text:
+        return None
+    t = re.sub(r"【[^】]*】", "", text)               # citation markers
+    t = re.sub(r"https?://\S+|www\.\S+", "", t)      # never pass links along
+    t = re.sub(r"[ \t]+\n", "\n", t).strip()
+    if not t or "NO NOTES" in t.upper():
+        return None
+    return t[:WEB_NOTES_MAX_CHARS]
+
+
+def web_research(history, api_key):
+    """Returns cleaned fact notes for the latest question, or None."""
+    if not api_key or not history:
+        return None
+    headers = {"Authorization": f"Bearer {api_key}"}
+    # last few chat lines only — never the student's name, grade or profile
+    request_text = _format_gate_transcript(history, "LATEST STUDENT QUESTION TO RESEARCH")
+    for research_model in WEB_RESEARCH_MODELS:
+        try:
+            r = requests.post(GROQ_API_URL, headers=headers, json={
+                "model": research_model,
+                "messages": [
+                    {"role": "system", "content": WEB_RESEARCH_PROMPT},
+                    {"role": "user", "content": request_text},
+                ],
+                "stream": False,
+                "tools": [{"type": "browser_search"}],
+                "tool_choice": "required",
+                # Groq recommends low effort with browser search — higher
+                # effort browses far longer and uses many more tokens.
+                "reasoning_effort": "low",
+                "max_completion_tokens": 1500,
+            }, timeout=(5, 45))
+            if r.status_code == 401:
+                return None
+            if r.status_code >= 400:
+                print(f"[ThinkStep] Web research: {research_model} said {r.status_code} "
+                      f"{r.text[:160]!r} — trying next / skipping.")
+                continue
+            content = ((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+            notes = _clean_web_notes(content)
+            if notes:
+                print(f"[ThinkStep] Web research: {len(notes)} chars of notes from {research_model}.")
+                return notes
+            print(f"[ThinkStep] Web research: {research_model} found nothing usable.")
+            return None
+        except Exception as e:
+            print(f"[ThinkStep] Web research error with {research_model}: {e}")
+            continue
+    return None
 
 
 @app.after_request
@@ -2130,7 +2290,9 @@ def chat():
     # they're scared or hurt must always get the tutor's caring reply, never
     # a "that's not schoolwork" brush-off. Blocked questions don't cost the
     # student any of their free questions or daily smartest-model uses.
-    if not safety_flagged and topic_gate_blocks(history, groq_api_key):
+    gate = {"blocked": False, "web": False} if safety_flagged else topic_gate_check(history, groq_api_key)
+    use_web = gate["web"]
+    if gate["blocked"]:
         print(f"[ThinkStep] OFF-TASK blocked — {who_label}: {last_user_msg[:120]!r}")
 
         def generate_off_task():
@@ -2163,6 +2325,21 @@ def chat():
                 q.put(SENTINEL)
                 return
             headers = {"Authorization": f"Bearer {groq_api_key}"}
+            # Web research first (only for questions the gate flagged). The
+            # notes go at the END of the tutor's instructions, after the
+            # fixed part, so the cached prefix still matches.
+            if use_web:
+                notes = web_research(history, groq_api_key)
+                if notes:
+                    payload["messages"][0] = {
+                        "role": "system",
+                        "content": payload["messages"][0]["content"]
+                        + "\n=== WEB NOTES (looked up for this question) ===\n"
+                        + notes
+                        + "\n=== END WEB NOTES ===\n",
+                    }
+            used_web_notes = bool(use_web and notes)
+            answer_parts = []  # what the student actually sees, to check at the end
             # Every TUTOR_ATTEMPTS step on the chosen model, in order. The
             # rate-limit fallback model is only added if Groq says "busy".
             ladder = [(model, extra) for extra in TUTOR_ATTEMPTS]
@@ -2217,6 +2394,7 @@ def chat():
                             content = (choices[0].get("delta") or {}).get("content") or ""
                             if content:
                                 q.put(content)
+                                answer_parts.append(content)
                                 streamed_any = True
                             finish = choices[0].get("finish_reason") or finish
                     _log_groq_usage(attempt_model, label, usage)
@@ -2226,6 +2404,10 @@ def chat():
                         continue
                     if streamed_any and finish == "length":
                         q.put("\n\n(I ran out of room there — say \"keep going\" and I'll finish!)")
+                    # "🔎 I checked the web" goes at the END, and only when
+                    # the tutor actually helped — never under a refusal.
+                    if used_web_notes and streamed_any and not _looks_like_refusal("".join(answer_parts)):
+                        q.put(WEB_INDICATOR)
                     result["succeeded"] = streamed_any
                     result["model_used"] = attempt_model
                     break
