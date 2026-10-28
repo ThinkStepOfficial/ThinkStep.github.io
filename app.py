@@ -1239,11 +1239,15 @@ Your job is to help kids LEARN, not to hand them answers. Follow these rules:
 How to write math (very important — the chat shows your reply as plain
 text, so any special math formatting shows up as confusing symbols):
 - Write fractions with a slash: 3/4, not \\frac{3}{4} and not $\\frac{3}{4}$.
+  The chat automatically shows a/b as a real stacked fraction with a
+  fraction bar. If the top or bottom has more than one part, put it in
+  parentheses so it stacks correctly: (x+1)/(x-2), (2+3)/5.
 - Never use LaTeX, never use backslash commands, and never wrap math in
   $ ... $, $$ ... $$, \\( ... \\), or \\[ ... \\].
 - Write mixed numbers plainly, like 2 1/3.
-- Use normal keyboard symbols: * or x for times, / for divide, ^ for
-  powers (like 5^2), and sqrt(9) for square roots.
+- Use normal keyboard symbols: x for times, ÷ for divide (like 12 ÷ 3),
+  ^ for powers (like 5^2), and sqrt(9) for square roots (the chat draws
+  a real square-root sign).
 - Don't use markdown formatting like **bold** or # headings — just write
   normal sentences.
 
@@ -1640,6 +1644,12 @@ Look at the photo and reply with JSON only, exactly this shape:
   problem: [left, top, right, bottom] as whole numbers from 0 to 1000,
   measured as a fraction of the image width (x) and height (y). 0,0 is the
   top-left corner and 1000,1000 the bottom-right.
+  The box must start at the problem's number and include ALL of its text,
+  any picture, diagram or table that belongs to it, and the student's
+  written work or answer blank. It must NOT include the title, directions
+  for the whole page, or any part of another problem. Boxes of different
+  problems must not overlap. Look carefully: measure where the first and
+  last line of each problem really are in the photo.
 - "focus": the index (0 = first) in "problems" of the one the student is
   asking about, based on their message below. If there is only one
   problem, 0. If they didn't say which, -1.
