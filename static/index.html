@@ -295,6 +295,27 @@
     border: 1px solid var(--border);
     border-bottom-left-radius: 4px;
   }
+  /* real stacked fractions and square roots in the tutor's replies */
+  .frac {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: stretch;
+    vertical-align: middle;
+    text-align: center;
+    font-size: .88em;
+    line-height: 1.12;
+    margin: 0 .14em;
+    position: relative;
+  }
+  .frac .num { padding: 0 .22em .06em; border-bottom: 2px solid currentColor; }
+  .frac .den { padding: .06em .22em 0; }
+  .frac .sl {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .sqrt { white-space: nowrap; }
+  .sqrt .rt { font-size: 1.12em; margin-right: -.04em; }
+  .sqrt .rad { border-top: 2px solid currentColor; padding: .05em .14em 0; }
   .msg.ai::before {
     content: "🧠 ThinkStep";
     display: block;
@@ -1844,6 +1865,44 @@ function renderEmptyState() {
     form.requestSubmit();
   }));
 }
+/* ---------- Pretty math ----------
+   Turns the tutor's plain math into the real thing: 3/4 becomes a stacked
+   fraction with a fraction bar, and sqrt(16) gets a proper square-root
+   sign. The text is made safe (escaped) FIRST, so nothing the AI writes can
+   ever become real HTML. Copying still gives "3/4", because a hidden slash
+   sits between the top and bottom. */
+const SUP_CHARS = '⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻ⁿ';
+// One side of a fraction: (a group), a number like 12 or 2.5, a term like
+// 3x or x², or a single letter.
+const FRAC_PART = `\\([^()\\n<>]{1,40}\\)|\\d+(?:\\.\\d+)?[a-zA-Z]?[${SUP_CHARS}]*|[a-zA-Z][${SUP_CHARS}]*`;
+const FRACTION_RE = new RegExp(
+  // not glued to the end of a word, number or another slash (so km/h, and/or,
+  // web addresses and dates like 10/27/2026 are left alone)
+  `(?<![\\w.\\/)\\]])(${FRAC_PART}) ?\\/ ?(${FRAC_PART})(?![\\w\\/(\\[]|\\.\\d)`, 'g');
+const SQRT_RE = /(?:sqrt|√)\s*\(([^()\n<>]{1,60})\)/g;
+
+function stripOuterParens(s) {
+  return /^\(.*\)$/.test(s) ? s.slice(1, -1) : s;
+}
+
+function mathHtml(text) {
+  let h = escapeHtml(text);
+  h = h.replace(FRACTION_RE, (m, top, bottom) => {
+    // needs a number or a ( ) group somewhere — "a/b" on its own is probably words
+    if (!/[\d(]/.test(top + bottom)) return m;
+    return `<span class="frac"><span class="num">${stripOuterParens(top)}</span>` +
+           `<span class="sl">/</span><span class="den">${stripOuterParens(bottom)}</span></span>`;
+  });
+  h = h.replace(SQRT_RE, (m, inside) =>
+    `<span class="sqrt"><span class="rt">√</span><span class="rad">${inside.trim()}</span></span>`);
+  return h;
+}
+
+// Shows a tutor reply: tidied up, then with real fractions and roots.
+function showAiText(el, text) {
+  el.innerHTML = mathHtml(tidyMath(text));
+}
+
 function renderMessages() {
   const active = getActive();
   chat.innerHTML = '';
@@ -1890,7 +1949,8 @@ function addMessage(role, text, msg) {
   } else {
     // Only the AI's replies need math tidying — whatever the student typed
     // should always be shown back to them exactly as they wrote it.
-    div.textContent = role === 'user' ? text : tidyMath(text);
+    if (role === 'user') div.textContent = text;
+    else showAiText(div, text);
   }
   chat.appendChild(div);
   scrollToBottom(true);
@@ -2205,6 +2265,109 @@ chatAreaEl.addEventListener('drop', (e) => {
   if (file) setPendingPhoto(file);
 });
 
+/* Makes the green box hug the real problem. The AI's box is a good guess,
+   but can be a little off. So the page looks at the actual photo: it finds
+   the dark pencil/ink marks, trims empty space off the box, and stretches
+   it if writing was cut off at an edge — but never into the next problem. */
+async function refineProblemBoxes(src, problems) {
+  if (!src || !Array.isArray(problems) || !problems.length) return problems;
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = reject;
+      i.src = src;
+    });
+    const scale = Math.min(1, 700 / Math.max(img.naturalWidth, img.naturalHeight));
+    const W = Math.max(1, Math.round(img.naturalWidth * scale));
+    const H = Math.max(1, Math.round(img.naturalHeight * scale));
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, W, H);
+    const px = ctx.getImageData(0, 0, W, H).data;
+    const gray = new Uint8Array(W * H);
+    for (let i = 0, j = 0; i < gray.length; i++, j += 4) {
+      gray[i] = (px[j] * 299 + px[j + 1] * 587 + px[j + 2] * 114) / 1000;
+    }
+
+    const toPx = b => [b[0] * W / 1000, b[1] * H / 1000, b[2] * W / 1000, b[3] * H / 1000];
+    const boxes = problems.map(p => toPx(p.box));
+
+    return problems.map((p, i) => {
+      const [bx1, by1, bx2, by2] = boxes[i];
+      // How far this box may move: halfway to any neighbouring problem.
+      let topLim = 0, botLim = H - 1, leftLim = 0, rightLim = W - 1;
+      boxes.forEach((o, j) => {
+        if (j === i) return;
+        const overlapX = Math.min(bx2, o[2]) - Math.max(bx1, o[0]) > 0;
+        const overlapY = Math.min(by2, o[3]) - Math.max(by1, o[1]) > 0;
+        if (overlapX && o[3] <= (by1 + by2) / 2) topLim = Math.max(topLim, (o[3] + by1) / 2);
+        if (overlapX && o[1] >= (by1 + by2) / 2) botLim = Math.min(botLim, (o[1] + by2) / 2);
+        if (overlapY && o[2] <= (bx1 + bx2) / 2) leftLim = Math.max(leftLim, (o[2] + bx1) / 2);
+        if (overlapY && o[0] >= (bx1 + bx2) / 2) rightLim = Math.min(rightLim, (o[0] + bx2) / 2);
+      });
+      // never search too far past the AI's guess (a line of writing can run
+      // sideways a long way, so sideways gets more room than up/down)
+      const reachX = W * 0.3, reachY = H * 0.07;
+      topLim = Math.max(topLim, by1 - reachY); botLim = Math.min(botLim, by2 + reachY);
+      leftLim = Math.max(leftLim, bx1 - reachX); rightLim = Math.min(rightLim, bx2 + reachX);
+      [topLim, botLim, leftLim, rightLim] = [topLim, botLim, leftLim, rightLim].map(Math.round);
+
+      // What counts as "ink": clearly darker than the paper around here
+      // (measured locally, so shadows and uneven light don't fool it).
+      const sample = [];
+      for (let y = topLim; y <= botLim; y += 3)
+        for (let x = leftLim; x <= rightLim; x += 3) sample.push(gray[y * W + x]);
+      sample.sort((a, b) => a - b);
+      const paper = sample[Math.floor(sample.length * 0.6)] || 255;
+      const inkBelow = Math.min(paper - 55, paper * 0.72);
+      if (inkBelow < 20) return p;   // too dark/low-contrast to judge — keep the AI's box
+
+      const rowInk = (y, x1, x2) => {
+        let n = 0;
+        for (let x = x1; x <= x2; x++) if (gray[y * W + x] < inkBelow) n++;
+        const span = x2 - x1 + 1;
+        return n >= Math.max(2, span * 0.004) && n < span * 0.6;   // a fully dark row is a shadow/edge
+      };
+      const colInk = (x, y1, y2) => {
+        let n = 0;
+        for (let y = y1; y <= y2; y++) if (gray[y * W + x] < inkBelow) n++;
+        const span = y2 - y1 + 1;
+        return n >= 1 && n < span * 0.85;   // thin answer blanks (____) count
+      };
+
+      // 1) trim empty space inside the AI's box
+      let x1 = Math.max(leftLim, Math.round(bx1)), x2 = Math.min(rightLim, Math.round(bx2));
+      let y1 = Math.max(topLim, Math.round(by1)), y2 = Math.min(botLim, Math.round(by2));
+      if (x2 - x1 < 4 || y2 - y1 < 4) return p;
+      while (y1 < y2 && !rowInk(y1, x1, x2)) y1++;
+      while (y2 > y1 && !rowInk(y2, x1, x2)) y2--;
+      while (x1 < x2 && !colInk(x1, y1, y2)) x1++;
+      while (x2 > x1 && !colInk(x2, y1, y2)) x2--;
+      if (y2 - y1 < 3 || x2 - x1 < 3) return p;   // no writing found — keep the AI's box
+
+      // 2) stretch out where writing was cut off (small gaps allowed, like
+      //    the space between lines or words)
+      const gapY = Math.max(3, Math.round(H * 0.045)), gapX = Math.max(3, Math.round(W * 0.03));
+      for (let pass = 0; pass < 3; pass++) {
+        for (let y = y1 - 1, gap = 0; y >= topLim && gap <= gapY; y--) { if (rowInk(y, x1, x2)) { y1 = y; gap = 0; } else gap++; }
+        for (let y = y2 + 1, gap = 0; y <= botLim && gap <= gapY; y++) { if (rowInk(y, x1, x2)) { y2 = y; gap = 0; } else gap++; }
+        for (let x = x1 - 1, gap = 0; x >= leftLim && gap <= gapX; x--) { if (colInk(x, y1, y2)) { x1 = x; gap = 0; } else gap++; }
+        for (let x = x2 + 1, gap = 0; x <= rightLim && gap <= gapX; x++) { if (colInk(x, y1, y2)) { x2 = x; gap = 0; } else gap++; }
+      }
+
+      // sanity check: if the result is wildly different, trust the AI instead
+      const oldArea = (bx2 - bx1) * (by2 - by1), newArea = (x2 - x1) * (y2 - y1);
+      if (newArea < oldArea * 0.015 || newArea > oldArea * 10) return p;
+      const back = [x1 * 1000 / W, y1 * 1000 / H, (x2 + 1) * 1000 / W, (y2 + 1) * 1000 / H].map(Math.round);
+      return { ...p, box: back, aiBox: p.box };
+    });
+  } catch {
+    return problems;   // anything odd — just use the AI's boxes
+  }
+}
+
 function pct(v) { return (v / 10) + '%'; }
 
 // The box to show: the problem being worked on, or — if the student didn't
@@ -2379,6 +2542,9 @@ async function sendMessage(text) {
       if (pm && !photoApplied) {
         photoApplied = true;
         try { userMsg.photo = JSON.parse(pm[1]); } catch { userMsg.photo = null; }
+        if (userMsg.photo && photo) {
+          userMsg.photo.problems = await refineProblemBoxes(photo.big, userMsg.photo.problems);
+        }
         if (photoWrap) {
           photoWrap.classList.remove('scanning');
           if (userMsg.photo) drawHomeworkBox(photoWrap, userMsg);
@@ -2388,7 +2554,7 @@ async function sendMessage(text) {
       const shown = full.replace(/\x03[\s\S]*?(\x03|$)/, '');
       if (!shown) continue;  // only the photo data so far — keep the dots going
       clearTimeout(slowNoteTimer);
-      aiDiv.textContent = tidyMath(shown.replace(/\x02/g, ''));
+      showAiText(aiDiv, shown.replace(/\x02/g, ''));
       scrollToBottom(false);
     }
     clearTimeout(slowNoteTimer);
