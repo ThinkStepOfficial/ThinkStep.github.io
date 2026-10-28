@@ -20,7 +20,7 @@ It also has a small account system:
   days; otherwise it's cleared when the browser closes.
 """
 
-from flask import Flask, request, jsonify, Response, send_from_directory, session
+from flask import Flask, request, jsonify, Response, send_from_directory, session, redirect
 import requests
 import json
 import os
@@ -45,6 +45,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 BASE_DIR = os.environ.get("THINKSTEP_DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__, static_folder="static")
+# Where the public homepage lives (GitHub Pages). Change with the
+# PUBLIC_HOME_URL setting on Render; set it to "" to serve it from here again.
+PUBLIC_HOME_URL = os.environ.get("PUBLIC_HOME_URL", "https://thinkstepofficial.github.io/thinkstep-tutor/")
 # Biggest request the server accepts (a chat with one homework photo is ~1-3 MB).
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 
@@ -1830,6 +1833,12 @@ def add_no_cache_headers(response):
 
 @app.route("/")
 def home():
+    # The public homepage now lives on GitHub Pages, which never falls
+    # asleep — so Google and Bing can always read it. On Render, send
+    # visitors there (301 = "moved for good", so search engines move their
+    # listing too). Running locally or in tests, the page is served here.
+    if os.environ.get("RENDER") and PUBLIC_HOME_URL:
+        return redirect(PUBLIC_HOME_URL, code=301)
     return send_from_directory("static", "home.html")
 
 
