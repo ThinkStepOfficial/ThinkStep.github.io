@@ -167,6 +167,7 @@
     <ul>
       <li><strong>Account info (if you sign up):</strong> a name, a grade level (1–12), and a password (stored as a secure hash — we never see or store your actual password).</li>
       <li><strong>Chat messages:</strong> what you type to the AI tutor, so it can respond to you. Chat history is used to keep the conversation working and is not sold or shared with advertisers. As a safety measure, if a message contains language that may indicate someone is in danger (for example, mentions of self-harm or being hurt by someone), that message is automatically logged so the app's operator can check in — see "Your safety" below.</li>
+      <li><strong>Homework photos (only if you send one):</strong> the photo is sent to Groq so the AI can read the problems on it, then thrown away — ThinkStep never saves photos on its servers. The written-out text of the problems, and a smaller copy of the photo, are kept in your own browser with the rest of the chat. Please only photograph homework — no faces, names, or addresses.</li>
       <li><strong>Guest usage:</strong> if you don't create an account, we store an anonymous random ID in a cookie on your device to track how many free questions you've used — this is not linked to your name or any personal information.</li>
       <li><strong>Feedback you submit:</strong> if you use the Feedback page, we collect the name, rating, and review you choose to provide.</li>
       <li><strong>Parental consent info:</strong> if a user indicates they are under 13, we collect a parent or guardian's email address to request consent before the account can be used, as required by law.</li>
@@ -225,8 +226,8 @@
     <p>Each of these only receives what it needs to do its job:</p>
     <ul>
       <li><strong>Groq</strong> (the AI that writes the tutor's replies): receives
-        your chat messages, plus your first name, grade and difficulty setting so
-        replies fit your level. Groq's terms say it does not use this data to
+        your chat messages and any homework photos you send, plus your first name,
+        grade and difficulty setting so replies fit your level. Groq's terms say it does not use this data to
         train AI models.</li>
       <li><strong>Exa</strong> (web search, used through Groq): for some questions
         that need up-to-date facts, the last few lines of the conversation are

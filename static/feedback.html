@@ -258,7 +258,7 @@
     <form id="feedbackForm">
       <div class="field">
         <label for="fbName">Your name</label>
-        <input id="fbName" type="text" placeholder="Your name" autocomplete="name" required />
+        <input id="fbName" type="text" placeholder="Your name" autocomplete="name" maxlength="100" required />
       </div>
 
       <div class="field">
@@ -275,7 +275,8 @@
 
       <div class="field">
         <label for="fbReview">Your review</label>
-        <textarea id="fbReview" placeholder="What did you like? What could be better?" required></textarea>
+        <textarea id="fbReview" placeholder="What did you like? What could be better?" maxlength="3000" required></textarea>
+        <div id="fbCount" style="text-align:right; font-size:13px; color:var(--muted); margin-top:4px;">0 / 3000</div>
       </div>
 
       <button type="submit" class="submit-btn" id="fbSubmitBtn">Send Feedback</button>
@@ -313,6 +314,8 @@
   const fbSubmitBtn = document.getElementById('fbSubmitBtn');
   const fbStatus = document.getElementById('fbStatus');
   const feedbackCard = document.getElementById('feedbackCard');
+  const fbCount = document.getElementById('fbCount');
+  fbReview.addEventListener('input', () => { fbCount.textContent = `${fbReview.value.length} / 3000`; });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
