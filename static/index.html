@@ -1900,7 +1900,10 @@ function mathHtml(text) {
 
 // Shows a tutor reply: tidied up, then with real fractions and roots.
 function showAiText(el, text) {
-  el.innerHTML = mathHtml(tidyMath(text));
+  // the AI sometimes uses extra-thin space characters ("3 and 6" would
+  // look like "3and6") — turn them into normal spaces
+  const t = (text || '').replace(/[\u00A0\u2000-\u200A\u202F\u205F]/g, ' ').replace(/\u200B/g, '');
+  el.innerHTML = mathHtml(tidyMath(t));
 }
 
 function renderMessages() {
