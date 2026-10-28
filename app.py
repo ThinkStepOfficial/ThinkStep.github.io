@@ -1744,45 +1744,53 @@ def read_homework_photo(data_url, student_text, api_key, image_size=None):
         {"type": "text", "text": "The student's message: " + (student_text or "(none)")[:500]},
         {"type": "image_url", "image_url": {"url": data_url}},
     ]
-    for vision_model in VISION_MODELS:
-        for extra in VISION_ATTEMPTS:
-            try:
-                body = {
-                    "model": vision_model,
-                    "messages": [
-                        {"role": "system", "content": PHOTO_READER_PROMPT},
-                        {"role": "user", "content": user_content},
-                    ],
-                    "stream": False,
-                    "temperature": 0.2,
-                    "max_completion_tokens": 1800,
-                }
-                body.update(extra)
-                r = requests.post(GROQ_API_URL, headers=headers, json=body, timeout=(10, 60))
-                if r.status_code == 404:
-                    print(f"[ThinkStep] Photo reader: {vision_model} not available — trying next.")
-                    break                       # this model is gone; next model
-                if r.status_code in (400, 413):
-                    print(f"[ThinkStep] Photo reader: {vision_model} rejected settings "
-                          f"{list(extra)} ({r.status_code}): {r.text[:160]!r}")
-                    continue                    # try lighter settings
-                if r.status_code == 429:
-                    print(f"[ThinkStep] Photo reader: {vision_model} busy — trying next.")
+    # Two rounds: a brief hiccup or "busy" moment at Groq is common, and a
+    # quick second try usually works — much nicer than telling a kid
+    # "I couldn't read that photo".
+    for round_no in range(2):
+        if round_no:
+            import time
+            time.sleep(1.5)
+            print("[ThinkStep] Photo reader: trying all models once more.")
+        for vision_model in VISION_MODELS:
+            for extra in VISION_ATTEMPTS:
+                try:
+                    body = {
+                        "model": vision_model,
+                        "messages": [
+                            {"role": "system", "content": PHOTO_READER_PROMPT},
+                            {"role": "user", "content": user_content},
+                        ],
+                        "stream": False,
+                        "temperature": 0.2,
+                        "max_completion_tokens": 1800,
+                    }
+                    body.update(extra)
+                    r = requests.post(GROQ_API_URL, headers=headers, json=body, timeout=(10, 60))
+                    if r.status_code == 404:
+                        print(f"[ThinkStep] Photo reader: {vision_model} not available — trying next.")
+                        break                       # this model is gone; next model
+                    if r.status_code in (400, 413):
+                        print(f"[ThinkStep] Photo reader: {vision_model} rejected settings "
+                              f"{list(extra)} ({r.status_code}): {r.text[:160]!r}")
+                        continue                    # try lighter settings
+                    if r.status_code == 429:
+                        print(f"[ThinkStep] Photo reader: {vision_model} busy — trying next.")
+                        break
+                    if r.status_code == 401:
+                        return None
+                    r.raise_for_status()
+                    content = ((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+                    reading = _clean_photo_reading(_extract_json_object(content), image_size)
+                    if reading is None:
+                        print(f"[ThinkStep] Photo reader: unreadable reply from {vision_model}: {content[:120]!r}")
+                        continue
+                    print(f"[ThinkStep] Photo reader: {vision_model} found {len(reading['problems'])} "
+                          f"problem(s), homework={reading['homework']}, focus={reading['focus']}.")
+                    return reading
+                except Exception as e:
+                    print(f"[ThinkStep] Photo reader error with {vision_model}: {e}")
                     break
-                if r.status_code == 401:
-                    return None
-                r.raise_for_status()
-                content = ((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
-                reading = _clean_photo_reading(_extract_json_object(content), image_size)
-                if reading is None:
-                    print(f"[ThinkStep] Photo reader: unreadable reply from {vision_model}: {content[:120]!r}")
-                    continue
-                print(f"[ThinkStep] Photo reader: {vision_model} found {len(reading['problems'])} "
-                      f"problem(s), homework={reading['homework']}, focus={reading['focus']}.")
-                return reading
-            except Exception as e:
-                print(f"[ThinkStep] Photo reader error with {vision_model}: {e}")
-                break
     return None
 
 
