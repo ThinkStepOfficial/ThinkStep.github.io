@@ -45,6 +45,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 BASE_DIR = os.environ.get("THINKSTEP_DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__, static_folder="static")
+# Biggest request the server accepts (a chat with one homework photo is ~1-3 MB).
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 
 
 # ============================================================
@@ -1585,6 +1587,210 @@ def web_research(history, api_key):
     return None
 
 
+# ============================================================
+# Homework photos — a kid snaps their worksheet, ThinkStep finds the
+# problems on it and draws a green box around the one they asked about.
+#
+# How it works: a vision model (it can see pictures) reads the photo ONCE
+# and returns (1) the text of the problems, written out, (2) where each
+# problem sits on the page, as a box. The text goes into the smart tutor's
+# private notes, so the same tutor teaches exactly like it does for typed
+# questions. The boxes go to the chat page, which draws the green box.
+#
+# Privacy: photos are sent to Groq to be read and are NEVER saved on
+# ThinkStep's server. Only the written-out text is kept, in the student's
+# own browser, so later messages still know what was on the page.
+# ============================================================
+VISION_MODELS = [
+    "qwen/qwen3.8-27b",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+]
+VISION_ATTEMPTS = [
+    {"reasoning_effort": "none", "response_format": {"type": "json_object"}},
+    {"response_format": {"type": "json_object"}},
+    {},
+]
+PHOTO_MAX_DATA_URL_CHARS = 3_000_000   # ~2.2 MB picture; the page shrinks photos well below this
+PHOTO_NOTES_MAX_CHARS = 2000
+PHOTO_MAX_PROBLEMS = 10
+PHOTOS_PER_VISITOR_HOUR = 30
+_photo_limiter = SlidingWindowLimiter(PHOTOS_PER_VISITOR_HOUR, 3600)
+# The green-box data travels to the page at the start of the reply, wrapped
+# in this invisible marker, and is never shown as text.
+PHOTO_MARK = "\x03"
+_PHOTO_DATA_URL_RE = re.compile(r"^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$")
+
+PHOTO_READER_PROMPT = """You read photos for ThinkStep, a homework helper for kids.
+Look at the photo and reply with JSON only, exactly this shape:
+{"appropriate": true, "homework": true, "notes": "...", "problems": [{"label": "...", "box": [x1, y1, x2, y2]}], "focus": 0}
+
+- "appropriate": false if the photo shows anything not OK for children
+  (violence, nudity, weapons, drugs, hateful symbols). Otherwise true.
+- "homework": true if the photo shows schoolwork: a worksheet, textbook
+  page, test, notebook, written or printed problems, a diagram or map for
+  school. false for anything else (selfies, pets, games, screens of videos).
+- "notes": write out EXACTLY what the questions or problems say, plus any
+  work or answers the student has written, in plain text. Number them the
+  way the page does. Write math plainly (3/4, x^2, sqrt(9)). Do NOT solve
+  anything. If a part is too blurry to read, say so. At most 1500 characters.
+- "problems": each separate question or problem on the page (at most 10).
+  "label" is how the page names it, like "Problem 3" or "Question 2b", or a
+  few words if it has no number. "box" is a tight box around that whole
+  problem: [left, top, right, bottom] as whole numbers from 0 to 1000,
+  measured as a fraction of the image width (x) and height (y). 0,0 is the
+  top-left corner and 1000,1000 the bottom-right.
+- "focus": the index (0 = first) in "problems" of the one the student is
+  asking about, based on their message below. If there is only one
+  problem, 0. If they didn't say which, -1.
+If "homework" is false, use "problems": [] and "focus": -1."""
+
+
+def valid_photo_data_url(s):
+    return (isinstance(s, str) and len(s) <= PHOTO_MAX_DATA_URL_CHARS
+            and bool(_PHOTO_DATA_URL_RE.match(s)))
+
+
+def _extract_json_object(text):
+    if not text:
+        return None
+    t = text.strip()
+    t = re.sub(r"^```(?:json)?\s*|\s*```$", "", t)
+    try:
+        return json.loads(t)
+    except Exception:
+        pass
+    start, end = t.find("{"), t.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(t[start:end + 1])
+        except Exception:
+            return None
+    return None
+
+
+def _clean_box(box, image_size=None):
+    """Any reasonable box -> [x1, y1, x2, y2] in 0..1000, or None."""
+    if not isinstance(box, (list, tuple)) or len(box) != 4:
+        return None
+    try:
+        x1, y1, x2, y2 = (float(v) for v in box)
+    except (TypeError, ValueError):
+        return None
+    biggest = max(x1, y1, x2, y2)
+    if biggest <= 1.0:                       # 0..1 fractions
+        x1, y1, x2, y2 = x1 * 1000, y1 * 1000, x2 * 1000, y2 * 1000
+    elif biggest > 1000:                     # looks like pixels of the photo
+        if not image_size:
+            return None
+        w, h = image_size
+        x1, x2 = x1 * 1000 / w, x2 * 1000 / w
+        y1, y2 = y1 * 1000 / h, y2 * 1000 / h
+    x1, x2 = sorted((x1, x2))
+    y1, y2 = sorted((y1, y2))
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(1000, x2), min(1000, y2)
+    if x2 - x1 < 8 or y2 - y1 < 8:           # too thin to be a real problem
+        return None
+    return [round(x1), round(y1), round(x2), round(y2)]
+
+
+def _clean_photo_reading(raw, image_size=None):
+    """Turns the vision model's JSON into something safe to use, or None."""
+    if not isinstance(raw, dict):
+        return None
+    appropriate = raw.get("appropriate") is not False
+    homework = raw.get("homework") is True or str(raw.get("homework")).lower() == "true"
+    notes = str(raw.get("notes") or "").strip()
+    notes = re.sub(r"https?://\S+|www\.\S+", "", notes)[:PHOTO_NOTES_MAX_CHARS]
+    problems = []
+    for p in (raw.get("problems") or [])[:PHOTO_MAX_PROBLEMS]:
+        if not isinstance(p, dict):
+            continue
+        box = _clean_box(p.get("box"), image_size)
+        if not box:
+            continue
+        label = re.sub(r"\s+", " ", str(p.get("label") or "")).strip()[:40] or f"Problem {len(problems) + 1}"
+        problems.append({"label": label, "box": box})
+    try:
+        focus = int(raw.get("focus", -1))
+    except (TypeError, ValueError):
+        focus = -1
+    if not (0 <= focus < len(problems)):
+        focus = 0 if len(problems) == 1 else -1
+    if not homework:
+        problems, focus = [], -1
+    return {"appropriate": appropriate, "homework": homework and appropriate,
+            "notes": notes if appropriate else "", "problems": problems, "focus": focus}
+
+
+def read_homework_photo(data_url, student_text, api_key, image_size=None):
+    """Reads a homework photo. Returns the cleaned reading, or None if no
+    vision model could read it."""
+    if not api_key or not valid_photo_data_url(data_url):
+        return None
+    headers = {"Authorization": f"Bearer {api_key}"}
+    user_content = [
+        {"type": "text", "text": "The student's message: " + (student_text or "(none)")[:500]},
+        {"type": "image_url", "image_url": {"url": data_url}},
+    ]
+    for vision_model in VISION_MODELS:
+        for extra in VISION_ATTEMPTS:
+            try:
+                body = {
+                    "model": vision_model,
+                    "messages": [
+                        {"role": "system", "content": PHOTO_READER_PROMPT},
+                        {"role": "user", "content": user_content},
+                    ],
+                    "stream": False,
+                    "temperature": 0.2,
+                    "max_completion_tokens": 1800,
+                }
+                body.update(extra)
+                r = requests.post(GROQ_API_URL, headers=headers, json=body, timeout=(10, 60))
+                if r.status_code == 404:
+                    print(f"[ThinkStep] Photo reader: {vision_model} not available — trying next.")
+                    break                       # this model is gone; next model
+                if r.status_code in (400, 413):
+                    print(f"[ThinkStep] Photo reader: {vision_model} rejected settings "
+                          f"{list(extra)} ({r.status_code}): {r.text[:160]!r}")
+                    continue                    # try lighter settings
+                if r.status_code == 429:
+                    print(f"[ThinkStep] Photo reader: {vision_model} busy — trying next.")
+                    break
+                if r.status_code == 401:
+                    return None
+                r.raise_for_status()
+                content = ((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+                reading = _clean_photo_reading(_extract_json_object(content), image_size)
+                if reading is None:
+                    print(f"[ThinkStep] Photo reader: unreadable reply from {vision_model}: {content[:120]!r}")
+                    continue
+                print(f"[ThinkStep] Photo reader: {vision_model} found {len(reading['problems'])} "
+                      f"problem(s), homework={reading['homework']}, focus={reading['focus']}.")
+                return reading
+            except Exception as e:
+                print(f"[ThinkStep] Photo reader error with {vision_model}: {e}")
+                break
+    return None
+
+
+def photo_notes_block(reading):
+    """The private note the tutor reads about the photo."""
+    focus = reading["focus"]
+    asked = (f'They are asking about {reading["problems"][focus]["label"]}. The page shows a '
+             f'green box around it on their photo, so you can call it "the problem in the green box".'
+             if focus >= 0 else
+             "They didn't say which problem. If there is more than one, ask which one "
+             "they want to start with.")
+    return ("\n=== PHOTO NOTES (the student just shared a photo of their homework; "
+            "this is what it shows) ===\n" + (reading["notes"] or "(the writing was hard to read)")
+            + "\n" + asked
+            + "\nTeach exactly as usual: hints and questions, never just the answers. If the "
+            "notes say part was blurry, ask the student to type that part.\n=== END PHOTO NOTES ===\n")
+
+
 @app.after_request
 def add_no_cache_headers(response):
     # Nothing this app serves should ever be cached — not the API responses
@@ -2498,8 +2704,26 @@ def chat():
             f"Whoa, that's a lot of questions really fast! Take a breather and try "
             f"again in {_minutes(wait) if wait >= 60 else f'{wait} seconds'}."))
 
+    # A homework photo with this question? (Only ever the newest message —
+    # older photos travel as their written-out notes instead.)
+    photo = data.get("image")
+    photo_size = None
+    if photo is not None:
+        if not valid_photo_data_url(photo):
+            return with_guest_cookie(notice_response(
+                "I couldn't open that picture. Try taking the photo again (JPG or PNG works best)."))
+        wait = _photo_limiter.hit(visitor)
+        if wait:
+            return with_guest_cookie(notice_response(
+                f"That's a lot of photos! Try typing your question, or send another photo in "
+                f"{_minutes(wait)}."))
+        size = data.get("imageSize")
+        if (isinstance(size, list) and len(size) == 2
+                and all(isinstance(v, (int, float)) and 0 < v < 20000 for v in size)):
+            photo_size = (float(size[0]), float(size[1]))
+
     print(f"[ThinkStep] Sending this request to Groq using model: {model} "
-          f"(user: {account_key or 'guest ' + str(guest_id)})")
+          f"(user: {account_key or 'guest ' + str(guest_id)}){' with a photo' if photo else ''}")
 
     history = data.get("messages", [])
     # ---- How much of the conversation the AI gets to remember ----
@@ -2520,6 +2744,25 @@ def chat():
     # relevant) part of the conversation always survives.
     MAX_HISTORY_MESSAGES = 60
     MAX_HISTORY_CHARS = 16000
+    # One giant pasted message could still blow the budget on its own (the
+    # loop below always keeps the last two), so cap each message too.
+    MAX_ONE_MESSAGE_CHARS = 4000
+    if not isinstance(history, list):
+        history = []
+    def _with_photo_notes(m):
+        text = str(m.get("content", ""))[:MAX_ONE_MESSAGE_CHARS]
+        notes = m.get("photoNotes")
+        if m.get("role") == "user" and isinstance(notes, str) and notes.strip():
+            # an earlier homework photo: the tutor gets its written-out text
+            text += ("\n\n[This message came with a photo of homework. It showed:\n"
+                     + notes.strip()[:PHOTO_NOTES_MAX_CHARS] + "]")
+        return {"role": m.get("role"), "content": text}
+
+    history = [
+        _with_photo_notes(m)
+        for m in history
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant")
+    ]
     if len(history) > MAX_HISTORY_MESSAGES:
         history = history[-MAX_HISTORY_MESSAGES:]
     total_chars = sum(len(str(m.get("content", ""))) for m in history)
@@ -2645,6 +2888,35 @@ def chat():
                 q.put(SENTINEL)
                 return
             headers = {"Authorization": f"Bearer {groq_api_key}"}
+            # A homework photo is read first: its text goes into the tutor's
+            # private notes, and the green-box data goes to the page.
+            if photo:
+                reading = read_homework_photo(photo, last_user_msg, groq_api_key, photo_size)
+                if reading is None:
+                    q.put(NOTICE + "I couldn't read that photo right now. Try a clearer, "
+                          "brighter picture — or type the problem and I'll help! 📸")
+                    q.put(SENTINEL)
+                    return
+                if not reading["appropriate"]:
+                    print(f"[ThinkStep] PHOTO blocked as not appropriate — {who_label}")
+                    q.put(NOTICE + "I can't help with that picture. Send a photo of your "
+                          "schoolwork, like a worksheet or a page from your textbook. 📚")
+                    q.put(SENTINEL)
+                    return
+                if not reading["homework"]:
+                    q.put(NOTICE + "Hmm, that doesn't look like schoolwork! Snap a photo of the "
+                          "worksheet or textbook page you're stuck on and I'll help. 📸")
+                    q.put(SENTINEL)
+                    return
+                q.put(PHOTO_MARK + json.dumps({
+                    "notes": reading["notes"],
+                    "problems": reading["problems"],
+                    "focus": reading["focus"],
+                }) + PHOTO_MARK)
+                payload["messages"][0] = {
+                    "role": "system",
+                    "content": payload["messages"][0]["content"] + photo_notes_block(reading),
+                }
             # Web research first (only for questions the gate flagged). The
             # notes go at the END of the tutor's instructions, after the
             # fixed part, so the cached prefix still matches.
