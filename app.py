@@ -125,45 +125,43 @@ class PostgresStore:
         # Imported here so running locally (file mode) doesn't need psycopg.
         import psycopg
         from psycopg.types.json import Jsonb
-        from psycopg_pool import ConnectionPool
         self._psycopg = psycopg
         self._Jsonb = Jsonb
-        self.pool = ConnectionPool(
-            url,
-            # Hold NO connections while the site is quiet, so Neon's free
-            # database can go to sleep instead of burning its monthly
-            # compute allowance. The pool closes one idle connection per
-            # max_idle window, so a small max_size + short max_idle means
-            # everything is released within about a minute of going quiet.
-            # 4 is plenty: each database call here takes a few milliseconds.
-            min_size=0,
-            max_size=4,
-            max_idle=15,
-            timeout=20,
-            # Check each connection before using it — a sleeping Neon
-            # database drops idle connections, and this quietly replaces
-            # a dead one instead of failing the request.
-            check=ConnectionPool.check_connection,
-            kwargs={
-                "autocommit": True,
-                "connect_timeout": 15,
-                # Neon's connection pooler can't keep "prepared statements"
-                # across requests, so don't create any.
-                "prepare_threshold": None,
-            },
-            open=True,
-        )
+        self._url = url
+        # No connection pool: each database call opens a quick connection and
+        # closes it straight away. Neon's "pooler" address is built for exactly
+        # this, it means nothing is held open while the site is quiet (so the
+        # free database can sleep), and there's no pool that can get stuck —
+        # a stuck pool once made every account request wait forever on Render.
+        # At most 8 database calls run at the same moment.
+        self._slots = threading.BoundedSemaphore(8)
         self._ensure_schema()
 
+    def _connect(self):
+        return self._psycopg.connect(
+            self._url,
+            autocommit=True,
+            connect_timeout=10,
+            # Neon's connection pooler can't keep "prepared statements"
+            # across requests, so don't create any.
+            prepare_threshold=None,
+        )
+
     def _run(self, fn):
-        """Runs fn(conn), retrying once on a dropped connection."""
+        """Runs fn(conn) on a fresh connection, retrying once if the
+        connection drops (for example while Neon wakes up)."""
         last = None
-        for _ in range(2):
+        for attempt in range(2):
+            if not self._slots.acquire(timeout=15):
+                raise self._psycopg.OperationalError("database busy — too many requests at once")
             try:
-                with self.pool.connection() as conn:
+                with self._connect() as conn:
                     return fn(conn)
             except self._psycopg.OperationalError as e:
                 last = e
+                print(f"[ThinkStep] Database call failed (try {attempt + 1}): {type(e).__name__}: {str(e)[:160]}")
+            finally:
+                self._slots.release()
         raise last
 
     def _ensure_schema(self):
@@ -231,7 +229,7 @@ class PostgresStore:
         return self._run(go)
 
     def close(self):
-        self.pool.close()
+        pass  # nothing is held open
 
 
 STORE = PostgresStore(DATABASE_URL) if DATABASE_URL else FileStore(BASE_DIR)
@@ -1970,6 +1968,20 @@ def sitemap_xml():
     return Response(body, mimetype="application/xml")
 
 
+@app.route("/api/db-check")
+def db_check():
+    """Tiny public health check for the database — says only whether it
+    works and how long it took (no names, no data, no settings)."""
+    t0 = datetime.now(timezone.utc).timestamp()
+    try:
+        STORE.read("db-check.json", None)
+        ok, kind = True, None
+    except Exception as e:
+        ok, kind = False, type(e).__name__
+    ms = int((datetime.now(timezone.utc).timestamp() - t0) * 1000)
+    return jsonify({"storage": STORE.kind, "ok": ok, "ms": ms, "error": kind}), (200 if ok else 503)
+
+
 @app.route("/ping")
 def ping():
     """For a free uptime monitor to hit every few minutes so Render's free
@@ -2693,7 +2705,12 @@ def guest_status():
         return jsonify({"loggedIn": True})
 
     guest_id, is_new = get_or_create_guest_id()
-    used = guest_questions_used(guest_id)
+    try:
+        used = guest_questions_used(guest_id)
+    except Exception as e:
+        # The page must never sit on "Loading…" because the database is slow.
+        print(f"[ThinkStep] guest-status: couldn't read guest usage: {type(e).__name__}")
+        used = 0
     resp = jsonify({
         "loggedIn": False,
         "used": used,
