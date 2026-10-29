@@ -890,6 +890,38 @@ def _brevo_settings():
     return None
 
 
+# ---- Your own Gmail, through a tiny Google Apps Script (works on Render) ----
+# Render blocks Gmail's normal email ports, but not ordinary web requests.
+# So a small script that lives in the ThinkStep Gmail account (see
+# gmail_sender_script.gs) does the sending, exactly like before — the email
+# still comes from ThinkStepv1.0@gmail.com. Set on Render (Environment):
+#   GMAIL_SCRIPT_URL    — the script's web app address (ends in /exec)
+#   GMAIL_SCRIPT_SECRET — the same secret phrase you typed into the script
+def _gmail_script_settings():
+    url = (os.environ.get("GMAIL_SCRIPT_URL") or "").strip()
+    secret = (os.environ.get("GMAIL_SCRIPT_SECRET") or "").strip()
+    if url.startswith("https://script.google.com/") and secret:
+        return url, secret
+    return None
+
+
+def _send_via_gmail_script(to_email, subject, body):
+    url, secret = _gmail_script_settings()
+    try:
+        r = requests.post(url, json={"secret": secret, "to": to_email, "subject": subject, "body": body},
+                          timeout=(5, 30), allow_redirects=True)
+        try:
+            ok = bool(r.json().get("ok"))
+        except ValueError:
+            ok = False
+        if r.status_code == 200 and ok:
+            return True
+        print(f"[ThinkStep] Gmail script didn't send the email ({r.status_code}): {r.text[:200]!r}")
+    except Exception as e:
+        print(f"[ThinkStep] Couldn't reach the Gmail script: {e}")
+    return False
+
+
 def _load_email_config():
     """Gmail sender + app password — from Render-style settings
     (GMAIL_ADDRESS / GMAIL_APP_PASSWORD) or email_config.json."""
@@ -914,6 +946,8 @@ def email_provider():
     Gmail is reported as unusable on Render, where its ports are blocked."""
     if _brevo_settings():
         return "brevo"
+    if _gmail_script_settings():
+        return "gmail_script"
     if _load_email_config():
         return None if os.environ.get("RENDER") else "gmail"
     return None
@@ -956,13 +990,15 @@ def send_email(to_email, subject, body):
     raises — a broken email setup should never crash a request)."""
     if _brevo_settings():
         return _send_via_brevo(to_email, subject, body)
+    if _gmail_script_settings():
+        return _send_via_gmail_script(to_email, subject, body)
     creds = _load_email_config()
     if not creds:
         print("[ThinkStep] Email isn't set up (no BREVO_API_KEY/EMAIL_FROM, no Gmail settings) — email not sent.")
         return False
     if os.environ.get("RENDER"):
         print("[ThinkStep] Not sending: Render's free plan blocks Gmail's email ports. "
-              "Set BREVO_API_KEY and EMAIL_FROM instead.")
+              "Set GMAIL_SCRIPT_URL and GMAIL_SCRIPT_SECRET (or Brevo) instead.")
         return False
     sender_email, app_password = creds
 
@@ -2001,8 +2037,8 @@ def setup_warnings():
         warnings.append(
             "Email isn't set up, so parent-approval emails, password resets and "
             "safety alerts can't be sent. "
-            + ("On Render, set BREVO_API_KEY and EMAIL_FROM."
-               if on_render else "Add email_config.json (Gmail) or BREVO_API_KEY + EMAIL_FROM."))
+            + ("On Render, set GMAIL_SCRIPT_URL and GMAIL_SCRIPT_SECRET (see gmail_sender_script.gs)."
+               if on_render else "Add email_config.json (Gmail) or GMAIL_SCRIPT_URL + GMAIL_SCRIPT_SECRET."))
     if not _load_groq_api_key():
         warnings.append("No Groq API key is set, so the AI tutor can't answer. Set GROQ_API_KEY.")
     return warnings
