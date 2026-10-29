@@ -894,22 +894,51 @@ def _brevo_settings():
 # Render blocks Gmail's normal email ports, but not ordinary web requests.
 # So a small script that lives in the ThinkStep Gmail account (see
 # gmail_sender_script.gs) does the sending, exactly like before — the email
-# still comes from ThinkStepv1.0@gmail.com. Set on Render (Environment):
-#   GMAIL_SCRIPT_URL    — the script's web app address (ends in /exec)
-#   GMAIL_SCRIPT_SECRET — the same secret phrase you typed into the script
+# still comes from ThinkStepv1.0@gmail.com.
+#
+# No shared password needed: ThinkStep puts the email in a one-time "outbox"
+# slot with a long random ticket and tells the script the ticket. The script
+# then fetches that email back from THIS site (its address is written into
+# the script) and sends it. Someone poking the script with made-up tickets
+# gets nothing, so it can't be used to send other people's email.
+# Set on Render (Environment):  GMAIL_SCRIPT_URL — the script's web app
+# address (ends in /exec).
+MAIL_OUTBOX_SECONDS = 120
+_mail_outbox = {}
+_mail_outbox_lock = threading.Lock()
+
+
 def _gmail_script_settings():
     url = (os.environ.get("GMAIL_SCRIPT_URL") or "").strip()
-    secret = (os.environ.get("GMAIL_SCRIPT_SECRET") or "").strip()
-    if url.startswith("https://script.google.com/") and secret:
-        return url, secret
+    if url.startswith("https://script.google.com/"):
+        return url
     return None
 
 
+def _outbox_put(payload):
+    ticket = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc).timestamp()
+    with _mail_outbox_lock:
+        for k in [k for k, (exp, _) in _mail_outbox.items() if exp < now]:
+            del _mail_outbox[k]
+        _mail_outbox[ticket] = (now + MAIL_OUTBOX_SECONDS, payload)
+    return ticket
+
+
+def _outbox_take(ticket):
+    now = datetime.now(timezone.utc).timestamp()
+    with _mail_outbox_lock:
+        item = _mail_outbox.pop(ticket, None)
+    if not item or item[0] < now:
+        return None
+    return item[1]
+
+
 def _send_via_gmail_script(to_email, subject, body):
-    url, secret = _gmail_script_settings()
+    url = _gmail_script_settings()
+    ticket = _outbox_put({"to": to_email, "subject": subject, "body": body})
     try:
-        r = requests.post(url, json={"secret": secret, "to": to_email, "subject": subject, "body": body},
-                          timeout=(5, 30), allow_redirects=True)
+        r = requests.post(url, json={"ticket": ticket}, timeout=(5, 40), allow_redirects=True)
         try:
             ok = bool(r.json().get("ok"))
         except ValueError:
@@ -919,7 +948,18 @@ def _send_via_gmail_script(to_email, subject, body):
         print(f"[ThinkStep] Gmail script didn't send the email ({r.status_code}): {r.text[:200]!r}")
     except Exception as e:
         print(f"[ThinkStep] Couldn't reach the Gmail script: {e}")
+    finally:
+        _outbox_take(ticket)   # never leave it waiting around
     return False
+
+
+@app.route("/api/mail-outbox/<ticket>")
+def mail_outbox(ticket):
+    """Only the Gmail script calls this, with the one-time ticket it was just given."""
+    item = _outbox_take(ticket) if len(ticket) >= 40 else None
+    if not item:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(item)
 
 
 def _load_email_config():
@@ -998,7 +1038,7 @@ def send_email(to_email, subject, body):
         return False
     if os.environ.get("RENDER"):
         print("[ThinkStep] Not sending: Render's free plan blocks Gmail's email ports. "
-              "Set GMAIL_SCRIPT_URL and GMAIL_SCRIPT_SECRET (or Brevo) instead.")
+              "Set GMAIL_SCRIPT_URL (or Brevo) instead.")
         return False
     sender_email, app_password = creds
 
@@ -2037,8 +2077,8 @@ def setup_warnings():
         warnings.append(
             "Email isn't set up, so parent-approval emails, password resets and "
             "safety alerts can't be sent. "
-            + ("On Render, set GMAIL_SCRIPT_URL and GMAIL_SCRIPT_SECRET (see gmail_sender_script.gs)."
-               if on_render else "Add email_config.json (Gmail) or GMAIL_SCRIPT_URL + GMAIL_SCRIPT_SECRET."))
+            + ("On Render, set GMAIL_SCRIPT_URL (see gmail_sender_script.gs)."
+               if on_render else "Add email_config.json (Gmail) or GMAIL_SCRIPT_URL."))
     if not _load_groq_api_key():
         warnings.append("No Groq API key is set, so the AI tutor can't answer. Set GROQ_API_KEY.")
     return warnings
