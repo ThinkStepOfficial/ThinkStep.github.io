@@ -2530,6 +2530,10 @@ async function sendMessage(text) {
       clearTimeout(slowNoteTimer);
       aiDiv.textContent = res.status === 524
         ? "The connection timed out before ThinkStep could answer. Please try again in a bit."
+        : res.status === 413
+        ? "That's too much to send at once (the photo or chat is too big). Try a smaller photo, or start a new chat."
+        : res.status === 429
+        ? "Whoa, that's a lot of questions really fast! Take a short break and try again in a minute."
         : `Something went wrong reaching ThinkStep (status ${res.status}). Try again in a moment.`;
       checkConnection();
       return;
