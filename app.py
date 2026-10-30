@@ -415,15 +415,25 @@ def _save_users(users):
         STORE.write("users.json", users)
 
 
+_last_seen_saved = {}
+
+
 def _touch_account_last_seen(key):
     """Persists a 'last seen' timestamp onto the account record itself (not
     just the in-memory presence tracker), so the admin view can show when
     someone was last around even after they've gone offline or the server
     has restarted."""
+    # Check-ins come every 10 seconds; saving the account each time would be
+    # wasteful, so "last seen" is saved at most once a minute per account.
+    now = datetime.now(timezone.utc)
+    prev = _last_seen_saved.get(key)
+    if prev and (now - prev).total_seconds() < 60:
+        return
+    _last_seen_saved[key] = now
     with _account_write_lock:
         users = _load_users()
         if key in users:
-            users[key]["last_seen"] = datetime.now(timezone.utc).isoformat()
+            users[key]["last_seen"] = now.isoformat()
             _save_users(users)
 
 
@@ -730,7 +740,7 @@ def require_admin():
 # resets on server restart) since it's just for a live headcount,
 # not a permanent record.
 # ============================================================
-ONLINE_WINDOW_SECONDS = 90
+ONLINE_WINDOW_SECONDS = 30   # the chat page checks in every 10 seconds
 _presence = {}
 _presence_lock = threading.Lock()
 
@@ -2162,18 +2172,12 @@ def admin_accounts():
 
     users = _load_users()
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=ONLINE_WINDOW_SECONDS)
+    with _presence_lock:
+        live = {k for k, v in _presence.items() if v["kind"] == "account" and v["last_seen"] >= cutoff}
     accounts = []
-    for u in users.values():
+    for key, u in users.items():
         last_seen = u.get("last_seen")
-        online = False
-        if last_seen:
-            try:
-                ls = datetime.fromisoformat(last_seen)
-                if ls.tzinfo is None:
-                    ls = ls.replace(tzinfo=timezone.utc)
-                online = ls >= cutoff
-            except ValueError:
-                pass
+        online = key in live
         accounts.append({
             "name": u["name"],
             "grade": u.get("grade", ""),
@@ -2203,6 +2207,14 @@ def heartbeat():
     admin view can show a rough live headcount. Doesn't require login —
     guests are counted too (anonymously, via their guest cookie)."""
     user = get_current_user()
+    if request.args.get("leaving"):
+        # the tab was closed: take them off the "online" list right away
+        presence_key = session.get("user_key") if user else (
+            f"guest:{request.cookies.get(GUEST_COOKIE_NAME)}" if request.cookies.get(GUEST_COOKIE_NAME) else None)
+        if presence_key:
+            with _presence_lock:
+                _presence.pop(presence_key, None)
+        return jsonify({"ok": True})
     guest_id, is_new = (None, False) if user else get_or_create_guest_id()
 
     if user:
