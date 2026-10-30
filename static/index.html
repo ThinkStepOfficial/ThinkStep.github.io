@@ -3614,7 +3614,10 @@ checkSeasonalBanner();
 initAccount();
 sendHeartbeat();
 setInterval(checkConnection, 30000);
-setInterval(sendHeartbeat, 25000);
+setInterval(sendHeartbeat, 10000);   // keeps the admin page's "online" list current
+document.addEventListener('visibilitychange', () => { if (!document.hidden) sendHeartbeat(); });
+// closing the tab tells the server straight away, so it drops off the list fast
+window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/heartbeat?leaving=1'); } catch {} });
 </script>
 
 </body>
