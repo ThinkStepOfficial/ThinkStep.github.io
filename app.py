@@ -1386,6 +1386,20 @@ TOPIC_GATE_CONTEXT_MESSAGES = 6
 NOTICE = "\x02"
 
 
+def _json_body():
+    """The request's JSON as a dict — or {} if it's missing, broken, or not
+    an object (a list, a number...). Bad input must get a polite 400, never
+    crash the server."""
+    data = request.get_json(force=True, silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+def _s(data, key):
+    """A text field from the request; anything that isn't text counts as empty."""
+    v = data.get(key)
+    return v if isinstance(v, str) else ""
+
+
 def notice_response(text):
     def gen():
         yield NOTICE + text
@@ -1957,10 +1971,15 @@ def robots_txt():
 @app.route("/sitemap.xml")
 def sitemap_xml():
     root = _site_root()
+    # On Render, "/" just forwards to the GitHub Pages homepage, and the
+    # privacy/terms pages also live there — search engines don't like
+    # sitemaps that list forwarding or copy pages, so list only the pages
+    # that really live here.
+    skip = {"/", "/privacy", "/terms"} if (os.environ.get("RENDER") and PUBLIC_HOME_URL) else set()
     urls = "".join(
         f"  <url><loc>{root}{path}</loc><changefreq>{freq}</changefreq>"
         f"<priority>{prio}</priority></url>\n"
-        for path, freq, prio in PUBLIC_PAGES
+        for path, freq, prio in PUBLIC_PAGES if path not in skip
     )
     body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -2025,8 +2044,8 @@ def admin_login():
                      f"minute{'s' if minutes_left != 1 else ''} and try again."
         }), 429
 
-    data = request.get_json(force=True) or {}
-    password = data.get("password") or ""
+    data = _json_body()
+    password = _s(data, "password")
 
     if not _admin_password_matches(password):
         _admin_record_failure()
@@ -2164,9 +2183,9 @@ def heartbeat():
 
 @app.route("/api/feedback", methods=["POST"])
 def submit_feedback():
-    data = request.get_json(force=True) or {}
-    name = (data.get("name") or "").strip()
-    review = (data.get("review") or "").strip()
+    data = _json_body()
+    name = _s(data, "name").strip()
+    review = _s(data, "review").strip()
     try:
         stars = int(data.get("stars"))
     except (TypeError, ValueError):
@@ -2206,21 +2225,34 @@ def models():
     return jsonify(ALLOWED_MODELS)
 
 
+_health_cache = {"at": 0.0, "ok": None}
+HEALTH_CACHE_SECONDS = 60
+
+
 @app.route("/api/health")
 def health():
+    """Is the AI reachable? Every open chat tab asks this every 30 seconds,
+    so Groq's answer is remembered for a minute instead of asking Groq
+    again for every tab, every time."""
     api_key = _load_groq_api_key()
     if not api_key:
         return jsonify({"groq": "not_configured"}), 503
-    try:
-        r = requests.get(
-            "https://api.groq.com/openai/v1/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=5,
-        )
-        r.raise_for_status()
+    now = datetime.now(timezone.utc).timestamp()
+    if _health_cache["ok"] is None or now - _health_cache["at"] > HEALTH_CACHE_SECONDS:
+        try:
+            r = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=5,
+            )
+            r.raise_for_status()
+            _health_cache["ok"] = True
+        except Exception:
+            _health_cache["ok"] = False
+        _health_cache["at"] = now
+    if _health_cache["ok"]:
         return jsonify({"groq": "ok"})
-    except Exception:
-        return jsonify({"groq": "unreachable"}), 503
+    return jsonify({"groq": "unreachable"}), 503
 
 
 # ============================================================
@@ -2229,19 +2261,19 @@ def health():
 @app.route("/api/signup", methods=["POST"])
 @locked_account_write
 def signup():
-    data = request.get_json(force=True) or {}
-    name = (data.get("name") or "").strip()
+    data = _json_body()
+    name = _s(data, "name").strip()
     # Collapse any embedded newlines/tabs/repeated whitespace into single
     # spaces. Beyond just tidiness, this keeps a crafted multi-line name
     # from being able to inject fake extra "instructions" into the block
     # of text we later hand to the AI as part of its system prompt.
     name = " ".join(name.split())
-    grade = (data.get("grade") or "").strip()
-    password = data.get("password") or ""
-    remember = bool(data.get("remember"))
-    is_13_or_older = bool(data.get("is13OrOlder"))
-    parent_email = (data.get("parentEmail") or "").strip()
-    recovery_email = (data.get("recoveryEmail") or "").strip()
+    grade = _s(data, "grade").strip()
+    password = _s(data, "password")
+    remember = data.get("remember") is True
+    is_13_or_older = data.get("is13OrOlder") is True
+    parent_email = _s(data, "parentEmail").strip()
+    recovery_email = _s(data, "recoveryEmail").strip()
 
     if not name or not grade or not password:
         return jsonify({"error": "Name, grade, and password are all required."}), 400
@@ -2470,10 +2502,10 @@ def _consent_result_page(title, message):
 
 @app.route("/api/login", methods=["POST"])
 def login():
-    data = request.get_json(force=True) or {}
-    name = (data.get("name") or "").strip()
-    password = data.get("password") or ""
-    remember = bool(data.get("remember"))
+    data = _json_body()
+    name = _s(data, "name").strip()
+    password = _s(data, "password")
+    remember = data.get("remember") is True
 
     key = name.strip().lower()
 
@@ -2520,8 +2552,8 @@ def delete_account():
     if not user:
         return jsonify({"error": "You need to be logged in to delete an account."}), 401
 
-    data = request.get_json(force=True) or {}
-    password = data.get("password") or ""
+    data = _json_body()
+    password = _s(data, "password")
     key = session.get("user_key")
 
     users = _load_users()
@@ -2544,8 +2576,8 @@ def delete_account():
 @app.route("/api/forgot-password", methods=["POST"])
 @locked_account_write
 def forgot_password():
-    data = request.get_json(force=True) or {}
-    name = (data.get("name") or "").strip()
+    data = _json_body()
+    name = _s(data, "name").strip()
     key = name.strip().lower()
 
     # Always return the same generic message whether or not the account
@@ -2658,7 +2690,7 @@ def reset_password_submit(token):
     # Accept both a normal form POST (from the page above) and JSON, for
     # flexibility.
     if request.is_json:
-        password = (request.get_json(force=True) or {}).get("password") or ""
+        password = (_json_body()).get("password") or ""
     else:
         password = request.form.get("password") or ""
 
@@ -2745,7 +2777,7 @@ def guest_age():
     current = session.get("guest_age")
     if current == "under13":
         return jsonify({"status": "under13"})
-    data = request.get_json(force=True) or {}
+    data = _json_body()
     try:
         age = int(data.get("age"))
     except (TypeError, ValueError):
@@ -2766,7 +2798,7 @@ def guest_age():
 # ============================================================
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    data = request.get_json(force=True)
+    data = _json_body()
     # One tutor model for everyone. Whatever the page asks for is ignored —
     # that way an old copy of the page still cached in someone's browser
     # (which may ask for the retired quicker model) still gets the smart one.
@@ -2891,7 +2923,9 @@ def chat():
         total_chars -= len(str(dropped.get("content", "")))
     print(f"[ThinkStep] Sending {len(history)} messages of history "
           f"(~{total_chars} characters) for context.")
-    profile = data.get("profile") or {}
+    profile = data.get("profile")
+    if not isinstance(profile, dict):
+        profile = {}
     # Name and grade now come from the account itself (not a separate
     # client-side profile) — this is the single source of truth so the
     # AI always knows who it's talking to once they're signed in.
@@ -2903,7 +2937,7 @@ def chat():
     last_user_msg = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
     who_label = name if name else f"guest {guest_id}" if guest_id else "guest"
     safety_flagged = check_safety_flag(who_label, last_user_msg)
-    difficulty = (profile.get("difficulty") or "").strip()
+    difficulty = _s(profile, "difficulty").strip()
     print(f"[ThinkStep] Student profile on this request — name: {name or '(none)'}, grade: {grade or '(none)'}, difficulty: {difficulty or 'just right'}")
 
     # Build a short, high-priority "student info" block and put it at the very
