@@ -1080,6 +1080,7 @@ BACKUP_FILES = [
     "consent_tokens.json",
     "reset_tokens.json",
     "safety_flags.json",
+    "activity.json",
 ]
 BACKUP_INTERVAL_SECONDS = 6 * 60 * 60  # every 6 hours
 BACKUP_KEEP = 28  # ~1 week of history at the interval above
@@ -1281,7 +1282,14 @@ Your job is to help kids LEARN, not to hand them answers. Follow these rules:
    it with a simple check-in question so they still engage with it.
 7. Always be encouraging, never make a kid feel bad for a wrong guess.
    Treat mistakes as a normal, useful part of learning.
-8. Keep responses short — a few sentences at a time, not long lectures.
+8. KEEP EVERY REPLY SHORT. This is a strict rule:
+   - 1 to 3 short sentences (about 40 words or fewer), then stop.
+   - Only ONE small step or ONE question per reply. Wait for the student
+     to answer before moving on — never lay out several steps at once.
+   - No lists, no long explanations, no repeating what they said back.
+   - If something truly needs more explaining, give the first small piece
+     and ask "Want the next part?" instead of writing it all.
+   Kids read (or listen to) every word, so short and clear always wins.
 9. REMEMBER the conversation and use it. You can see everything said
    earlier in this chat, so act like it:
    - Never re-ask something they already answered, and never re-explain
@@ -1312,6 +1320,30 @@ Your job is to help kids LEARN, not to hand them answers. Follow these rules:
    - If a student asks you to "look it up" or "search it", that's a normal
      schoolwork request. Use the WEB NOTES if there are any; if there are
      none, help with what you already know.
+
+QUIZ TIME (a fun reward when a student is doing well):
+- When the student has clearly got the hang of something — for example
+  they've solved 2 or 3 steps or problems in a row on their own — you may
+  offer a quick quiz on that topic. Say it in one short, cheerful sentence
+  (like "You're on a roll! Want a quick quiz to show what you know?") and
+  put the tag [[QUIZ_OFFER]] at the very end of that reply. The page turns
+  that tag into buttons where they choose how many questions.
+- If the student asks to be quizzed, reply in one short sentence and add
+  [[QUIZ_OFFER]] the same way.
+- Offer at most once every 10 or so messages, and never again right after
+  they said no.
+- While a quiz is running, the STUDENT INFO section will say "QUIZ MODE"
+  and how many questions there are. Then:
+  - Ask ONE question at a time, starting with "Question 2 of 5:" (the
+    right numbers). Questions are about what you were just practicing, at
+    their grade and difficulty level. Never give the answer in the question.
+  - When they answer, say in a few words if it's right. If it's wrong, give
+    the right answer with a very short why (this is a quiz, so it's OK to
+    tell them now). Put [[RIGHT]] or [[WRONG]] right after that.
+  - Then ask the next question in the same reply. After the LAST answer,
+    don't ask another one: cheer them on about their score and add
+    [[QUIZ_DONE]] at the very end.
+  - Only use these tags exactly as written, and only for quizzes.
 
 How to write math (very important — the chat shows your reply as plain
 text, so any special math formatting shows up as confusing symbols):
@@ -2112,6 +2144,11 @@ def setup_warnings():
                if on_render else "Add email_config.json (Gmail) or GMAIL_SCRIPT_URL."))
     if not _load_groq_api_key():
         warnings.append("No Groq API key is set, so the AI tutor can't answer. Set GROQ_API_KEY.")
+    if _tts_state.get("reason") == "terms":
+        warnings.append(
+            "The read-aloud voice needs one click: open console.groq.com/playground, pick "
+            "canopylabs/orpheus-v1-english, and accept its terms. (Until then the page uses "
+            "its on-device voice.)")
     return warnings
 
 
@@ -2289,11 +2326,13 @@ def signup():
         is_13_or_older = False
     if not is_13_or_older and not _looks_like_email(parent_email):
         return jsonify({"error": "Please enter a parent or guardian's email address."}), 400
-    # Recovery email is optional for 13+ accounts, but if one is given it
-    # has to actually look like an email — otherwise "forgot password"
-    # later would silently fail to reach anyone.
-    if is_13_or_older and recovery_email and not _looks_like_email(recovery_email):
-        return jsonify({"error": "That recovery email doesn't look valid."}), 400
+    # Every account needs an email: 13+ students give their own (used for
+    # password resets and, if they want, progress emails); under-13s use
+    # the parent's email above.
+    if is_13_or_older and not _looks_like_email(recovery_email):
+        return jsonify({"error": "Please enter your email address."}), 400
+    if len(recovery_email) > 254 or len(parent_email) > 254:
+        return jsonify({"error": "That email address is too long."}), 400
 
     # Spam limit: only accounts actually created count (typos don't), so a
     # whole class can still sign up from one school network.
@@ -2329,15 +2368,14 @@ def signup():
 
     if is_13_or_older:
         user_record["consent_status"] = "not_required"
-        if recovery_email:
-            user_record["recovery_email"] = recovery_email
+        user_record["recovery_email"] = recovery_email
         users[key] = user_record
         _save_users(users)
         _signup_limiter.record(visitor_id())
         session.permanent = remember
         session["user_key"] = key
         print(f"[ThinkStep] New account created: {name} (grade {grade})")
-        return jsonify({"name": name, "grade": grade})
+        return jsonify(account_payload(user_record))
 
     # Under 13 — the account is created but stays locked out of login
     # until a parent/guardian clicks the consent link we email them.
@@ -2365,6 +2403,8 @@ def signup():
         f"policy here: {request.url_root}privacy\n\n"
         f"If you're okay with {name} using ThinkStep, click this link to approve "
         f"their account:\n{consent_link}\n\n"
+        f"After approving, you can choose how often you'd like a short progress "
+        f"email (every day, week, month, or never).\n\n"
         f"If you did not expect this email or don't want {name} to have an "
         f"account, you can simply ignore it — nothing further will happen and "
         f"their account will stay inactive.\n"
@@ -2454,6 +2494,7 @@ def consent_activate(token):
         return _consent_result_page("Account not found", "This account may have been deleted.")
 
     user["consent_status"] = "granted"
+    report_token = ensure_report_token(user)
     users[key] = user
     _save_users(users)
 
@@ -2461,10 +2502,11 @@ def consent_activate(token):
     _save_consent_tokens(tokens)
 
     print(f"[ThinkStep] Parental consent granted for account: {user['name']}")
-    return _consent_result_page(
-        "Thanks — account approved! 🎉",
-        f"{html.escape(user['name'])} can now log in and start using ThinkStep."
-    )
+    safe_name = html.escape(user["name"])
+    return _report_page("Account approved", _report_choice_form(
+        report_token, user["name"], None,
+        f'<p class="done">🎉</p><h1>Thanks, account approved!</h1>'
+        f'<p>{safe_name} can now log in and start using ThinkStep.</p>'))
 
 
 _CONSENT_PAGE_STYLE = """<style>
@@ -2533,7 +2575,7 @@ def login():
     session["user_key"] = key
     _touch_account_last_seen(key)
     print(f"[ThinkStep] Logged in: {user['name']}")
-    return jsonify({"name": user["name"], "grade": user.get("grade", "")})
+    return jsonify(account_payload(user))
 
 
 @app.route("/api/logout", methods=["POST"])
@@ -2564,6 +2606,7 @@ def delete_account():
     name = stored["name"]
     users.pop(key, None)
     _save_users(users)
+    forget_activity(key)
     session.pop("user_key", None)
     _clear_login_failures(key)
     print(f"[ThinkStep] Account deleted (self-service): {name}")
@@ -2723,11 +2766,7 @@ def me():
     user = get_current_user()
     if not user:
         return jsonify({"loggedIn": False})
-    return jsonify({
-        "loggedIn": True,
-        "name": user["name"],
-        "grade": user.get("grade", ""),
-    })
+    return jsonify(dict(account_payload(user), loggedIn=True))
 
 
 @app.route("/api/guest-status")
@@ -2796,6 +2835,484 @@ def guest_age():
 # ============================================================
 # Chat route
 # ============================================================
+# ============================================================
+# Activity + progress emails
+#
+# For each account we keep a tiny daily tally — how many questions,
+# homework photos, finished quizzes and new badges — and nothing else
+# (never what was asked). It powers the progress emails: a parent of an
+# under-13 picks how often they want one when they approve the account
+# (or later from the link in any email); 13+ students pick for their own
+# email in the Account box. A background thread sends whatever is due.
+# ============================================================
+ACTIVITY_FILE = "activity.json"
+ACTIVITY_KEEP_DAYS = 40
+REPORT_FREQS = {"daily": 1, "weekly": 7, "monthly": 30}
+REPORT_FREQ_LABELS = {"daily": "every day", "weekly": "every week",
+                      "monthly": "every month", "never": "no emails"}
+REPORT_CHECK_SECONDS = 10 * 60
+REPORTS_PER_RUN = 40   # the Gmail sender allows ~100 emails a day in total
+APP_URL = (os.environ.get("APP_URL") or "https://thinkstep-github-io-1.onrender.com/").rstrip("/") + "/"
+_activity_lock = threading.RLock()
+
+BADGES = {
+    "first": "🌱 First Step",
+    "streak3": "🔥 3-Day Streak",
+    "streak7": "🌟 7-Day Streak",
+    "q10": "💡 10 Questions",
+    "q50": "🧠 50 Questions",
+    "q100": "🏔️ 100 Questions",
+    "photo": "📸 Snapshot",
+    "quiz": "🎯 Quiz Whiz",
+    "perfect": "💯 Perfect Quiz",
+    "listen": "🎧 Good Listener",
+    "focus": "⏱️ Focus Finisher",
+}
+
+
+def _today_str():
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def record_activity(key, questions=0, photos=0, quiz=None, badge=None):
+    """Adds to today's tally for one account. Never raises — a hiccup here
+    must never break the chat."""
+    if not key:
+        return
+    try:
+        with _activity_lock:
+            everyone = STORE.read(ACTIVITY_FILE, {}) or {}
+            days = everyone.setdefault(key, {})
+            day = days.setdefault(_today_str(), {})
+            if questions:
+                day["q"] = day.get("q", 0) + questions
+            if photos:
+                day["photos"] = day.get("photos", 0) + photos
+            if quiz:
+                quizzes = day.setdefault("quizzes", [])
+                if len(quizzes) < 30:
+                    quizzes.append(quiz)
+            if badge and badge not in day.get("badges", []):
+                day.setdefault("badges", []).append(badge)
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=ACTIVITY_KEEP_DAYS)).date().isoformat()
+            for old in [d for d in days if d < cutoff]:
+                days.pop(old, None)
+            STORE.write(ACTIVITY_FILE, everyone)
+    except Exception as e:
+        print(f"[ThinkStep] Couldn't record activity: {e}")
+
+
+def forget_activity(key):
+    with _activity_lock:
+        everyone = STORE.read(ACTIVITY_FILE, {}) or {}
+        if everyone.pop(key, None) is not None:
+            STORE.write(ACTIVITY_FILE, everyone)
+
+
+def activity_summary(key, days, now=None):
+    now = now or datetime.now(timezone.utc)
+    start = (now - timedelta(days=days)).date().isoformat()
+    tally = (STORE.read(ACTIVITY_FILE, {}) or {}).get(key, {})
+    out = {"questions": 0, "photos": 0, "active_days": 0, "quizzes": 0,
+           "quiz_right": 0, "quiz_total": 0, "badges": []}
+    for day, d in tally.items():
+        if day < start:
+            continue
+        if d.get("q") or d.get("quizzes"):
+            out["active_days"] += 1
+        out["questions"] += d.get("q", 0)
+        out["photos"] += d.get("photos", 0)
+        for q in d.get("quizzes", []):
+            out["quizzes"] += 1
+            out["quiz_total"] += q.get("total", 0)
+            out["quiz_right"] += q.get("right", 0)
+        for b in d.get("badges", []):
+            if b in BADGES and BADGES[b] not in out["badges"]:
+                out["badges"].append(BADGES[b])
+    return out
+
+
+def is_under_13_account(user):
+    return bool(user.get("parent_email")) and user.get("consent_status") != "not_required"
+
+
+def report_email_for(user):
+    """Who gets this account's progress emails: the parent for under-13s,
+    the student's own email for everyone else."""
+    if is_under_13_account(user):
+        return user.get("parent_email", "").strip() if user.get("consent_status") == "granted" else ""
+    return (user.get("recovery_email") or "").strip()
+
+
+def ensure_report_token(user):
+    if not user.get("report_token"):
+        user["report_token"] = secrets.token_urlsafe(24)
+    return user["report_token"]
+
+
+def build_report(user, freq, now=None):
+    days = REPORT_FREQS[freq]
+    s = activity_summary(user["name"].strip().lower(), days, now)
+    name = user["name"]
+    period = {"daily": "today", "weekly": "this week", "monthly": "this month"}[freq]
+    under13 = is_under_13_account(user)
+    hello = "Hi,\n\n" if under13 else f"Hi {name},\n\n"
+    if s["questions"] == 0 and s["quizzes"] == 0:
+        lines = [f"{name} didn't use ThinkStep {period} — no worries! Whenever homework "
+                 f"feels tricky, ThinkStep is there to help, free."]
+    else:
+        header = (f"Here's {name}'s ThinkStep update for {period}:" if under13
+                  else f"Here's your ThinkStep update for {period}:")
+        lines = [header, ""]
+        lines.append(f"• Questions worked on: {s['questions']}")
+        lines.append(f"• Days practiced: {s['active_days']} of {days}")
+        if s["photos"]:
+            lines.append(f"• Homework photos: {s['photos']}")
+        if s["quizzes"]:
+            lines.append(f"• Quizzes finished: {s['quizzes']} "
+                         f"(got {s['quiz_right']} of {s['quiz_total']} questions right)")
+        if s["badges"]:
+            lines.append(f"• New badges: {', '.join(s['badges'])}")
+    token = user.get("report_token", "")
+    body = (hello + "\n".join(lines) + "\n\n"
+            "ThinkStep guides kids with hints and questions, so the thinking (and the "
+            "learning) is theirs.\n\n"
+            f"Change how often you get these emails, or turn them off:\n"
+            f"{APP_URL}api/report-settings/{token}\n")
+    subject = (f"{name}'s ThinkStep update" if under13 else "Your ThinkStep update")
+    return subject, body, s
+
+
+def send_due_reports(now=None):
+    """Sends every progress email that's due. Returns how many were sent."""
+    now = now or datetime.now(timezone.utc)
+    due = []
+    with _account_write_lock:
+        users = _load_users()
+        changed = False
+        for key, user in users.items():
+            freq = user.get("report_freq")
+            if freq not in REPORT_FREQS or not report_email_for(user):
+                continue
+            since = user.get("last_report_at") or user.get("report_freq_set_at")
+            try:
+                since_dt = datetime.fromisoformat(since) if since else None
+            except ValueError:
+                since_dt = None
+            if since_dt and now - since_dt < timedelta(days=REPORT_FREQS[freq]) - timedelta(minutes=30):
+                continue
+            # marked BEFORE sending, so a crash can't make it send twice
+            user["last_report_at"] = now.isoformat()
+            ensure_report_token(user)
+            changed = True
+            if since_dt is None:
+                continue  # first check after choosing: start the clock, send next time
+            due.append(dict(user))
+            if len(due) >= REPORTS_PER_RUN:
+                break
+        if changed:
+            _save_users(users)
+    sent = 0
+    for user in due:
+        subject, body, s = build_report(user, user["report_freq"], now)
+        if user["report_freq"] == "daily" and s["questions"] == 0 and s["quizzes"] == 0:
+            continue  # no "nothing today" emails every single day
+        if send_email(report_email_for(user), subject, body):
+            sent += 1
+    if sent:
+        print(f"[ThinkStep] Sent {sent} progress email(s).")
+    return sent
+
+
+def _report_loop():
+    import time as _time
+    _time.sleep(60)
+    while True:
+        try:
+            send_due_reports()
+        except Exception as e:
+            print(f"[ThinkStep] Progress emails failed this round: {e}")
+        _time.sleep(REPORT_CHECK_SECONDS)
+
+
+def start_report_thread():
+    threading.Thread(target=_report_loop, daemon=True).start()
+
+
+def _find_user_by_report_token(token):
+    if not token or len(token) > 100:
+        return None, None, None
+    users = _load_users()
+    for key, user in users.items():
+        if user.get("report_token") and hmac.compare_digest(user["report_token"], token):
+            return key, user, users
+    return None, None, None
+
+
+def _report_choice_form(token, name, current=None, intro=""):
+    current = current or "weekly"
+    safe_name = html.escape(name)
+    options = "".join(
+        f'<label class="opt"><input type="radio" name="freq" value="{v}"'
+        f'{" checked" if v == current else ""}> {html.escape(label.capitalize())}</label>'
+        for v, label in (("daily", "every day"), ("weekly", "every week"),
+                         ("monthly", "every month"), ("never", "no emails, thanks")))
+    return f"""{intro}
+  <h2>How often would you like progress emails about {safe_name}?</h2>
+  <p>A short note with how many questions {safe_name} worked on, days practiced,
+  quiz scores and badges. Never what they asked.</p>
+  <form method="POST" action="/api/report-settings/{html.escape(token)}">
+    <div class="opts">{options}</div>
+    <button type="submit" class="approve-btn">Save my choice</button>
+  </form>"""
+
+
+_REPORT_EXTRA_STYLE = """<style>
+  h2 { font-size: 17px; margin: 22px 0 8px; color: #1b2740; }
+  .opts { display: grid; gap: 8px; text-align: left; margin: 0 auto 18px; max-width: 260px; }
+  .opt { display: flex; gap: 10px; align-items: center; font-size: 15px; padding: 9px 12px;
+         border: 1px solid #dbe6fb; border-radius: 10px; cursor: pointer; }
+  .opt:has(input:checked) { border-color: #2f6fed; background: #eaf1ff; }
+  .done { font-size: 26px; margin: 0 0 4px; }
+</style>"""
+
+
+def _report_page(title, inner):
+    return Response(f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>{html.escape(title)} — ThinkStep</title>
+{_REPORT_EXTRA_STYLE}{_CONSENT_PAGE_STYLE}
+<body><div class="card">{inner}</div></body></html>""", mimetype="text/html")
+
+
+@app.route("/api/report-settings/<token>", methods=["GET"])
+def report_settings_page(token):
+    key, user, _ = _find_user_by_report_token(token)
+    if not user:
+        return _consent_result_page("This link isn't valid",
+                                    "It may have been copied incorrectly, or the account was deleted.")
+    return _report_page("Progress emails", _report_choice_form(
+        token, user["name"], user.get("report_freq"),
+        f"<h1>Progress emails</h1><p>Right now: <b>{REPORT_FREQ_LABELS.get(user.get('report_freq'), 'no emails')}</b>.</p>"))
+
+
+@app.route("/api/report-settings/<token>", methods=["POST"])
+@locked_account_write
+def report_settings_save(token):
+    key, user, users = _find_user_by_report_token(token)
+    if not user:
+        return _consent_result_page("This link isn't valid",
+                                    "It may have been copied incorrectly, or the account was deleted.")
+    freq = request.form.get("freq", "")
+    if freq not in REPORT_FREQ_LABELS:
+        return _consent_result_page("Please pick one", "Go back and choose how often you'd like emails.")
+    _set_report_freq(user, freq)
+    users[key] = user
+    _save_users(users)
+    print(f"[ThinkStep] Progress emails for {user['name']}: {freq}")
+    msg = ("You won't get progress emails. You can turn them back on any time from this same link."
+           if freq == "never" else
+           f"You'll get a progress email {REPORT_FREQ_LABELS[freq]}. "
+           f"Every email has a link to change this.")
+    return _report_page("Saved", f'<p class="done">✅</p><h1>Saved!</h1><p>{msg}</p>')
+
+
+def _set_report_freq(user, freq):
+    if user.get("report_freq") != freq:
+        user["report_freq"] = freq
+        user["report_freq_set_at"] = datetime.now(timezone.utc).isoformat()
+        user.pop("last_report_at", None)
+    ensure_report_token(user)
+
+
+@app.route("/api/my-report-settings", methods=["POST"])
+@locked_account_write
+def my_report_settings():
+    """13+ students choose progress emails for their own email address.
+    (For under-13s only the parent can, from the link they were emailed.)"""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Please log in first."}), 401
+    if is_under_13_account(user):
+        return jsonify({"error": "Your parent or guardian chooses this from their email."}), 403
+    freq = _s(_json_body(), "freq")
+    if freq not in REPORT_FREQ_LABELS:
+        return jsonify({"error": "Please pick how often."}), 400
+    key = session.get("user_key")
+    users = _load_users()
+    _set_report_freq(users[key], freq)
+    _save_users(users)
+    return jsonify({"ok": True, "reportFreq": freq})
+
+
+@app.route("/api/set-email", methods=["POST"])
+@locked_account_write
+def set_email():
+    """Every account needs an email now. Accounts made before that rule
+    are asked for one the next time they log in."""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Please log in first."}), 401
+    if is_under_13_account(user):
+        return jsonify({"error": "Your account already uses your parent's email."}), 403
+    email = _s(_json_body(), "email").strip()
+    if not _looks_like_email(email) or len(email) > 254:
+        return jsonify({"error": "That email doesn't look right — check it and try again."}), 400
+    key = session.get("user_key")
+    users = _load_users()
+    users[key]["recovery_email"] = email
+    _save_users(users)
+    return jsonify({"ok": True})
+
+
+def account_payload(user):
+    return {
+        "name": user["name"],
+        "grade": user.get("grade", ""),
+        "needsEmail": needs_email(user),
+        "under13": is_under_13_account(user),
+        "reportFreq": user.get("report_freq") or "never",
+    }
+
+
+def needs_email(user):
+    return not is_under_13_account(user) and not (user.get("recovery_email") or "").strip()
+
+
+@app.route("/api/activity", methods=["POST"])
+def post_activity():
+    """The page reports finished quizzes and newly earned badges, so they
+    can go in progress emails. Logged-in accounts only."""
+    user = get_current_user()
+    if not user:
+        return jsonify({"ok": False}), 200
+    data = _json_body()
+    kind = _s(data, "kind")
+    key = session.get("user_key")
+    if kind == "quiz":
+        total, right = data.get("total"), data.get("right")
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (total, right)) \
+                or not (1 <= total <= 20 and 0 <= right <= total):
+            return jsonify({"error": "bad quiz"}), 400
+        record_activity(key, quiz={"total": total, "right": right})
+    elif kind == "badge":
+        badge = _s(data, "id")
+        if badge not in BADGES:
+            return jsonify({"error": "bad badge"}), 400
+        record_activity(key, badge=badge)
+    else:
+        return jsonify({"error": "unknown"}), 400
+    return jsonify({"ok": True})
+
+
+# ============================================================
+# Read aloud — very human voices from Groq (Orpheus)
+#
+# The page splits each answer into short pieces (up to 200 characters)
+# and asks for them one at a time. The free Groq plan only allows a
+# small number of these a day for the whole site, so: identical pieces
+# are remembered, each visitor has a fair-share limit, and when Groq says
+# "that's enough for today" we stop asking until it resets. The page then
+# switches to its own human-sounding AI voice that runs on the device.
+# ============================================================
+TTS_URL = "https://api.groq.com/openai/v1/audio/speech"
+TTS_MODEL = "canopylabs/orpheus-v1-english"
+TTS_VOICES = {"hannah", "autumn", "diana", "austin", "daniel", "troy"}
+TTS_MAX_CHARS = 200
+TTS_PER_VISITOR_HOUR = 120
+TTS_CACHE_MAX_BYTES = 40 * 1024 * 1024
+_tts_cache = {}            # (voice, text) -> wav bytes; oldest dropped first
+_tts_cache_lock = threading.Lock()
+_tts_state = {"down_until": 0.0, "reason": ""}
+_tts_limiter = SlidingWindowLimiter(TTS_PER_VISITOR_HOUR, 3600)
+
+
+def _parse_groq_reset(value):
+    """'2m59.56s' / '1h0m3s' / '7.66s' -> seconds."""
+    total = 0.0
+    for num, unit in re.findall(r"([\d.]+)\s*(ms|h|m|s)", value or ""):
+        try:
+            n = float(num)
+        except ValueError:
+            continue
+        total += n * {"h": 3600, "m": 60, "s": 1, "ms": 0.001}[unit]
+    return total
+
+
+def _tts_cache_get(k):
+    with _tts_cache_lock:
+        v = _tts_cache.pop(k, None)
+        if v is not None:
+            _tts_cache[k] = v  # most recently used goes to the end
+        return v
+
+
+def _tts_cache_put(k, audio):
+    with _tts_cache_lock:
+        _tts_cache[k] = audio
+        size = sum(len(v) for v in _tts_cache.values())
+        while size > TTS_CACHE_MAX_BYTES and _tts_cache:
+            oldest = next(iter(_tts_cache))
+            size -= len(_tts_cache.pop(oldest))
+
+
+def _tts_unavailable(reason, status=503):
+    return jsonify({"fallback": True, "reason": reason}), status
+
+
+@app.route("/api/speak", methods=["POST"])
+def speak():
+    user = get_current_user()
+    if not user and session.get("guest_age") != "ok":
+        return _tts_unavailable("not_allowed", 403)
+    data = _json_body()
+    text = " ".join(_s(data, "text").split())
+    voice = _s(data, "voice")
+    if voice not in TTS_VOICES or not text or len(text) > TTS_MAX_CHARS:
+        return jsonify({"error": "Send up to 200 characters and a voice."}), 400
+
+    cache_key = (voice, text)
+    audio = _tts_cache_get(cache_key)
+    if audio is not None:
+        return Response(audio, mimetype="audio/wav", headers={"Cache-Control": "private, max-age=86400"})
+
+    now = datetime.now(timezone.utc).timestamp()
+    if now < _tts_state["down_until"]:
+        return _tts_unavailable(_tts_state["reason"] or "resting")
+    if _tts_limiter.hit(visitor_id()):
+        return _tts_unavailable("visitor_limit", 429)
+    api_key = _load_groq_api_key()
+    if not api_key:
+        return _tts_unavailable("not_configured")
+    try:
+        r = requests.post(TTS_URL, headers={"Authorization": f"Bearer {api_key}"},
+                          json={"model": TTS_MODEL, "voice": voice, "input": text,
+                                "response_format": "wav"},
+                          timeout=(5, 25))
+    except Exception as e:
+        print(f"[ThinkStep] Voice request failed: {e}")
+        _tts_state.update(down_until=now + 20, reason="unreachable")
+        return _tts_unavailable("unreachable")
+    if r.status_code == 200 and r.content:
+        _tts_cache_put(cache_key, r.content)
+        return Response(r.content, mimetype="audio/wav", headers={"Cache-Control": "private, max-age=86400"})
+    body = (r.text or "")[:300]
+    if r.status_code == 429:
+        wait = max(_parse_groq_reset(r.headers.get("retry-after", "") + "s"),
+                   _parse_groq_reset(r.headers.get("x-ratelimit-reset-requests", "")), 60)
+        _tts_state.update(down_until=now + min(wait, 6 * 3600), reason="daily_limit")
+        print(f"[ThinkStep] Groq voice limit reached — on-device voice for the next {int(wait)}s.")
+        return _tts_unavailable("daily_limit")
+    if "terms" in body.lower():
+        _tts_state.update(down_until=now + 600, reason="terms")
+        print("[ThinkStep] Groq voice needs its terms accepted: open the Groq Playground, "
+              "pick canopylabs/orpheus-v1-english and accept.")
+        return _tts_unavailable("terms")
+    print(f"[ThinkStep] Groq voice error {r.status_code}: {body!r}")
+    _tts_state.update(down_until=now + 60, reason="error")
+    return _tts_unavailable("error")
+
+
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = _json_body()
@@ -2844,6 +3361,9 @@ def chat():
                 "in the sidebar to keep learning."))
 
     account_key = session.get("user_key") if user else None
+    if user and needs_email(user):
+        return notice_response("Please add your email address first (there's a box for it "
+                               "on the page), then ask me anything! 📧")
 
     # Speed limits, for everyone: stops a script from flooding the site and
     # using up the free AI allowance that every student shares.
@@ -2970,6 +3490,20 @@ def chat():
             "further with tougher hints and deeper questions, while still never "
             "giving the answer outright."
         )
+
+    # A quiz the student chose to take (the page keeps count of how far
+    # along it is, so the tutor knows which question number comes next).
+    quiz = profile.get("quiz")
+    if isinstance(quiz, dict):
+        total, answered, right = quiz.get("total"), quiz.get("answered"), quiz.get("right")
+        if (all(isinstance(v, int) and not isinstance(v, bool) for v in (total, answered, right))
+                and 1 <= total <= 20 and 0 <= right <= answered <= total):
+            if answered < total:
+                student_info_lines.append(
+                    f"- QUIZ MODE: a {total}-question quiz is running. {answered} answered so far "
+                    f"({right} right). The next question to ask is question {answered + 1} of {total}. "
+                    f"Follow the QUIZ TIME rules exactly."
+                )
 
     # The fixed tutor instructions go FIRST and the per-student details go
     # AFTER them. Order matters for cost: Groq caches the start of a request
@@ -3192,6 +3726,8 @@ def chat():
         # Only count a guest's free question if it genuinely got a response —
         # a timeout, connection error, or crash shouldn't cost them anything.
         # (Accounts have no question limit, so there's nothing to count.)
+        if succeeded and user:
+            record_activity(account_key, questions=1, photos=1 if photo else 0)
         if succeeded and not user:
             record_guest_usage(guest_id, visitor)
             print(f"[ThinkStep] Guest {guest_id} usage: {guest_questions_used(guest_id)}/{GUEST_QUESTION_LIMIT}")
@@ -3212,6 +3748,7 @@ def on_server_start():
         return
     _server_started = True
     start_backup_thread()
+    start_report_thread()
     for w in setup_warnings():
         print(f"[ThinkStep] SETUP WARNING: {w}")
 
