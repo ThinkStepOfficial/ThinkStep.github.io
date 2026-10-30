@@ -3294,6 +3294,7 @@ def speak():
         _tts_state.update(down_until=now + 20, reason="unreachable")
         return _tts_unavailable("unreachable")
     if r.status_code == 200 and r.content:
+        _tts_state.update(down_until=0.0, reason="")   # working again: clear any old warning
         _tts_cache_put(cache_key, r.content)
         return Response(r.content, mimetype="audio/wav", headers={"Cache-Control": "private, max-age=86400"})
     body = (r.text or "")[:300]
