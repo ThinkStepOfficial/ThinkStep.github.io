@@ -256,6 +256,11 @@ def test_voice_terms_problem_shows_up_for_the_admin(app_module, client, monkeypa
     res = client.post("/api/speak", json={"text": "hi", "voice": "troy"})
     assert res.get_json()["reason"] == "terms"
     assert any("orpheus" in w for w in app_module.setup_warnings())
+    # once the terms are accepted and a reading works, the warning goes away
+    app_module._tts_state["down_until"] = 0
+    _fake_voice(app_module, monkeypatch)
+    assert client.post("/api/speak", json={"text": "hello", "voice": "troy"}).status_code == 200
+    assert not any("orpheus" in w for w in app_module.setup_warnings())
 
 
 def test_chat_page_has_the_new_controls():
@@ -264,3 +269,28 @@ def test_chat_page_has_the_new_controls():
     for needle in ('id="themeToggle"', 'id="badgeShelf"', 'id="voiceSelect"', 'id="autoRead"',
                    'id="emailOverlay"', 'id="quizPill"', ':root[data-theme="dark"]', "kokoro-js@"):
         assert needle in html, needle
+
+
+# ---------- faster "who's online" ----------
+
+def test_closing_the_tab_takes_you_off_the_online_list(app_module, client, admin_client):
+    make_account(client, "Quick Quinn", "9", "password1")
+    client.post("/api/heartbeat")
+    names = [a["name"] for a in admin_client.get("/api/admin/online").get_json()["accounts"]]
+    assert "Quick Quinn" in names
+    roster = {a["name"]: a["online"] for a in admin_client.get("/api/admin/accounts").get_json()["accounts"]}
+    assert roster["Quick Quinn"] is True
+    client.post("/api/heartbeat?leaving=1")
+    assert "Quick Quinn" not in [a["name"] for a in admin_client.get("/api/admin/online").get_json()["accounts"]]
+    roster = {a["name"]: a["online"] for a in admin_client.get("/api/admin/accounts").get_json()["accounts"]}
+    assert roster["Quick Quinn"] is False
+
+
+def test_last_seen_is_not_saved_on_every_check_in(app_module, client, monkeypatch):
+    make_account(client, "Saver Sam", "9", "password1")
+    saves = []
+    real = app_module._save_users
+    monkeypatch.setattr(app_module, "_save_users", lambda u: saves.append(1) or real(u))
+    for _ in range(5):
+        client.post("/api/heartbeat")
+    assert len(saves) <= 1
