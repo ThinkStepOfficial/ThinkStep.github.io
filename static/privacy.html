@@ -166,13 +166,24 @@
     <h2>Information we collect</h2>
     <p>When you use ThinkStep, we may collect:</p>
     <ul>
-      <li><strong>Account info (if you sign up):</strong> a name, a grade level (1–12), and a password (stored as a secure hash — we never see or store your actual password).</li>
+      <li><strong>Account info (if you sign up):</strong> a name, a grade level (1–12), a password (stored as a secure hash — we never see or store your actual password), and an email address: your own if you're 13 or older, or a parent or guardian's if you're under 13.</li>
+      <li><strong>Progress counts (accounts only):</strong> for each day, how many questions were asked, how many homework photos were sent, quiz scores, and badges earned — never what was asked. These counts are kept for about 40 days and are only used for progress emails.</li>
       <li><strong>Chat messages:</strong> what you type to the AI tutor, so it can respond to you. Chat history is used to keep the conversation working and is not sold or shared with advertisers. As a safety measure, if a message contains language that may indicate someone is in danger (for example, mentions of self-harm or being hurt by someone), that message is automatically logged so the app's operator can check in — see "Your safety" below.</li>
       <li><strong>Homework photos (only if you send one):</strong> the photo is sent to Groq so the AI can read the problems on it, then thrown away — ThinkStep never saves photos on its servers. The written-out text of the problems, and a smaller copy of the photo, are kept in your own browser with the rest of the chat. Please only photograph homework — no faces, names, or addresses.</li>
       <li><strong>Guest usage:</strong> if you don't create an account, we store an anonymous random ID in a cookie on your device to track how many free questions you've used — this is not linked to your name or any personal information.</li>
       <li><strong>Feedback you submit:</strong> if you use the Feedback page, we collect the name, rating, and review you choose to provide.</li>
       <li><strong>Parental consent info:</strong> if a user indicates they are under 13, we collect a parent or guardian's email address to request consent before the account can be used, as required by law.</li>
+      <li><strong>Read aloud (only if you use it):</strong> the text of a tutor reply is sent to Groq to turn it into speech; the audio isn't saved. If that voice is busy, the page may instead download a free voice model (from jsDelivr and Hugging Face) that runs entirely on your own device.</li>
     </ul>
+
+    <h2>Progress emails</h2>
+    <p>
+      When a parent or guardian approves an under-13 account, they choose how
+      often (every day, week, month, or never) to get a short email with the
+      progress counts above. Students 13 and older can choose the same for
+      their own email in the Account box. Every email has a link to change
+      this or turn it off.
+    </p>
 
     <h2>What we don't do</h2>
     <ul>
@@ -227,7 +238,7 @@
     <p>Each of these only receives what it needs to do its job:</p>
     <ul>
       <li><strong>Groq</strong> (the AI that writes the tutor's replies): receives
-        your chat messages and any homework photos you send, plus your first name,
+        your chat messages, any homework photos you send, and the text of replies you ask to hear read aloud, plus your first name,
         grade and difficulty setting so replies fit your level. Groq's terms say it does not use this data to
         train AI models.</li>
       <li><strong>Exa</strong> (web search, used through Groq): for some questions
@@ -237,8 +248,8 @@
       <li><strong>Render</strong> (website hosting) and <strong>Neon</strong>
         (database): run the website and store account information, feedback,
         and safety-check logs.</li>
-      <li><strong>Gmail</strong> (email): sends parent-consent and password-reset
-        emails, and lets the app's operator receive feedback and safety alerts.</li>
+      <li><strong>Gmail</strong> (email): sends parent-consent, password-reset
+        and progress emails, and lets the app's operator receive feedback and safety alerts.</li>
     </ul>
     <p>We never use these services for advertising, and we don't sell
       information to them or to anyone else.</p>

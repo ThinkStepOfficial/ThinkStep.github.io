@@ -9,6 +9,15 @@
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="preload" href="/static/fonts/lexend-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts/lexend.css">
+<script>
+  // Night mode is applied before the page draws, so it never flashes white.
+  try {
+    const t = localStorage.getItem('thinkstep_theme');
+    if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.dataset.theme = 'dark';
+    }
+  } catch (e) {}
+</script>
 <style>
   button, input, textarea, select { font-family: inherit; } /* lexend */
   :root {
@@ -1019,6 +1028,120 @@
     #chatList li .del { opacity: 1; padding: 4px 6px; font-size: 19px; }
     #newChatBtn { min-height: 46px; font-size: 17px; }
   }
+
+  /* ===== NIGHT MODE — soft navy, not harsh black ===== */
+  :root[data-theme="dark"] {
+    --bg: #111a2e;
+    --card: #17223a;
+    --primary: #5b8cff;
+    --primary-dark: #9cb8ff;
+    --primary-light: #1f2c4b;
+    --accent: #4a6db5;
+    --text: #e2e8f5;
+    --muted: #94a3c0;
+    --border: #27344f;
+    --bubble-user: #3d6fe0;
+    --bubble-ai: #1c2843;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.3);
+    color-scheme: dark;
+  }
+  :root[data-theme="dark"] :is(#feedbackLink, #exportBtn, .starter-chip, #micBtn, #photoBtn,
+      .timer-controls button.secondary, textarea#notes, .difficulty-row button, .account-buttons button.secondary,
+      .account-modal, .account-modal input, .account-modal select, .streak-stat, .nav-toggle, .icon-btn,
+      input#prompt:focus, .photo-wrap, #photoPreview .pp-remove, .quiz-chip.ghost, .voice-select) {
+    background: var(--card);
+  }
+  :root[data-theme="dark"] :is(button:hover, #newChatBtn:hover, .feedback-card-btn:hover) { background: #4a7cf0; }
+  :root[data-theme="dark"] :is(.difficulty-row button:hover, .account-buttons button.secondary:hover,
+      .timer-controls button.secondary:hover, .starter-chip:hover, #micBtn:hover, #photoBtn:hover,
+      .icon-btn:hover, .nav-toggle:hover, #feedbackLink:hover, #exportBtn:hover, .quiz-chip.ghost:hover) {
+    background: var(--primary-light);
+  }
+  :root[data-theme="dark"] .difficulty-row button.active:not(#_) { background: var(--primary); color: #fff; border-color: var(--primary); }
+  :root[data-theme="dark"] button:disabled { background: #2b3856; color: #8090b0; }
+  :root[data-theme="dark"] .msg.ai.notice { background: #2a2416; border-color: #4d4122; color: #ead9b0; }
+  :root[data-theme="dark"] .account-modal .error-msg { background: #351e1e; color: #f3b4ab; border-color: #5a2d2a; }
+  :root[data-theme="dark"] #photoPreview { background: #15291f; border-color: #24513a; }
+  :root[data-theme="dark"] #photoPreview .pp-text { color: #a9e5c0; }
+  :root[data-theme="dark"] #photoPreview .pp-text small { color: #86b99a; }
+  :root[data-theme="dark"] #connBanner { background: #2c2414; color: #f0d79c; border-color: #4d4122; }
+  :root[data-theme="dark"] #seasonalBanner.summer { background: #2c2414; color: #f0d79c; border-color: #4d4122; }
+  :root[data-theme="dark"] #seasonalBanner.backtoschool { background: #1a2846; color: #c7d7ff; border-color: #2b3c64; }
+  :root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #2f3d5c; }
+  :root[data-theme="dark"] :is(#accountOverlay, #forgotPasswordOverlay, #ageOverlay, #emailOverlay) { background: rgba(3, 8, 20, 0.6); }
+  body, header, .sidebar-left, .sidebar-right, .tool-card, .msg, footer, input#prompt {
+    transition: background-color .35s var(--ease), color .35s var(--ease), border-color .35s var(--ease);
+  }
+  .icon-btn {
+    background: white; color: var(--primary-dark); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0; width: 40px; height: 40px; font-size: 18px; line-height: 1;
+    box-shadow: none;
+  }
+  .icon-btn:hover { background: var(--primary-light); box-shadow: none; }
+
+  /* ===== BADGES — quiet little shelf, gentle toast ===== */
+  .badge-shelf { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
+  .badge {
+    width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+    font-size: 16px; background: var(--primary-light); cursor: default; position: relative;
+  }
+  .badge.locked { filter: grayscale(1); opacity: .22; background: transparent; }
+  .badge.fresh { animation: badgeIn .7s var(--ease); }
+  @keyframes badgeIn { 0% { transform: scale(.4); opacity: 0; } 60% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); } }
+  .badge-count { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  #toast {
+    position: fixed; left: 50%; bottom: 92px; transform: translate(-50%, 10px);
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    box-shadow: var(--shadow-md); border-radius: 999px; padding: 8px 16px; font-size: 14.5px;
+    opacity: 0; pointer-events: none; transition: opacity .35s var(--ease), transform .35s var(--ease); z-index: 200;
+    white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* ===== QUIZ ===== */
+  .quiz-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; white-space: normal; }
+  .quiz-offer .lbl { font-size: 14px; color: var(--muted); margin-right: 2px; }
+  .quiz-chip { padding: 6px 13px; font-size: 14.5px; border-radius: 999px; min-height: 0; }
+  .quiz-chip.ghost { background: white; color: var(--muted); border: 1px solid var(--border); box-shadow: none; }
+  .quiz-chip.ghost:hover { background: var(--primary-light); }
+  #quizPill {
+    display: none; align-items: center; gap: 8px; font-size: 14px; color: var(--primary-dark);
+    background: var(--primary-light); border-radius: 999px; padding: 5px 6px 5px 12px; margin-right: auto;
+  }
+  #quizPill.show { display: inline-flex; }
+  #quizPill button { background: transparent; color: var(--muted); padding: 0 6px; font-size: 13px; box-shadow: none; min-height: 0; }
+  #quizPill button:hover { color: var(--text); background: transparent; }
+
+  /* ===== READ ALOUD ===== */
+  .say-btn {
+    display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;
+    margin-left: 6px; width: 28px; height: 28px; padding: 0; border-radius: 50%;
+    background: transparent; color: var(--muted); font-size: 15px; box-shadow: none; opacity: .55;
+    transition: opacity .2s, background .2s;
+  }
+  .msg.ai:hover .say-btn, .say-btn:focus-visible, .say-btn.playing { opacity: 1; }
+  .say-btn:hover { background: var(--primary-light); color: var(--primary-dark); box-shadow: none; }
+  .say-btn.playing { color: var(--primary); animation: sayPulse 1.2s ease-in-out infinite; }
+  .say-btn.loading { animation: sayPulse .6s ease-in-out infinite; }
+  @keyframes sayPulse { 50% { transform: scale(1.15); } }
+  @media (hover: none) { .say-btn { opacity: .85; } }
+  .voice-row { margin-bottom: 10px; }
+  .voice-select {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
+    background: white; color: var(--text); font-size: 14.5px; margin-bottom: 10px;
+  }
+  .switch-row { display: flex; align-items: center; gap: 8px; font-size: 14.5px; cursor: pointer; margin-bottom: 8px; }
+  .switch-row input { width: 17px; height: 17px; accent-color: var(--primary); }
+  .voice-note { font-size: 12.5px; color: var(--muted); margin-top: 6px; min-height: 1em; }
+  .report-row { margin-top: 12px; font-size: 13.5px; color: var(--muted); }
+  .report-row select { margin-top: 4px; }
+
+  #emailOverlay {
+    display: none; position: fixed; inset: 0; background: rgba(20, 30, 60, 0.45);
+    z-index: 110; align-items: center; justify-content: center; padding: 16px;
+  }
+  #emailOverlay.open { display: flex; }
 </style>
 </head>
 <body>
@@ -1033,6 +1156,7 @@
       </div>
     </div>
     <div class="model-picker">
+      <button type="button" id="themeToggle" class="icon-btn" title="Night mode" aria-label="Night mode">🌙</button>
       <button type="button" id="toolsToggle" class="nav-toggle" title="Tools">🛠</button>
     </div>
   </header>
@@ -1054,6 +1178,7 @@
 
   <div class="chat-area">
     <div class="chat-toolbar">
+      <span id="quizPill"><span id="quizPillText"></span><button type="button" id="quizStop" title="Stop the quiz">✕ stop</button></span>
       <button type="button" id="exportBtn">⬇ Export summary</button>
       <a href="/feedback" id="feedbackLink" style="text-decoration:none; display:inline-flex; align-items:center;">💬 Feedback</a>
     </div>
@@ -1106,6 +1231,20 @@
         <div class="streak-stat"><div class="num" id="streakNum">0</div><div class="label">day streak</div></div>
         <div class="streak-stat"><div class="num" id="problemsNum">0</div><div class="label">questions asked</div></div>
       </div>
+      <div class="badge-shelf" id="badgeShelf"></div>
+      <div class="badge-count" id="badgeCount"></div>
+    </div>
+
+    <div class="tool-card">
+      <h3>🔊 Read Aloud</h3>
+      <div class="difficulty-row voice-row">
+        <button type="button" class="voice-btn" data-gender="girl">Girl voice</button>
+        <button type="button" class="voice-btn" data-gender="boy">Boy voice</button>
+      </div>
+      <select id="voiceSelect" class="voice-select" aria-label="Pick a voice"></select>
+      <label class="switch-row"><input type="checkbox" id="autoRead"> Read answers out loud automatically</label>
+      <button type="button" class="small-btn" id="voiceSample">▶ Hear this voice</button>
+      <div class="voice-note" id="voiceNote"></div>
     </div>
 
 
@@ -1169,9 +1308,9 @@
         <div class="field-hint">We'll email them to approve this account before it can be used — that's required by law for kids under 13.</div>
       </div>
       <div id="recoveryEmailWrap" style="display:none;">
-        <label for="accRecoveryEmail">Recovery email (optional)</label>
-        <input id="accRecoveryEmail" type="email" autocomplete="off" />
-        <div class="field-hint">Only used if you ever need to reset a forgotten password. You can skip this, but without it we won't be able to help you get back in.</div>
+        <label for="accRecoveryEmail">Your email</label>
+        <input id="accRecoveryEmail" type="email" autocomplete="email" maxlength="254" />
+        <div class="field-hint">Every account needs one. It's how you get back in if you forget your password (and you can get progress emails if you want them).</div>
       </div>
       <label class="remember-row"><input type="checkbox" id="accRemember" checked /> Keep me signed in</label>
       <div class="error-msg" id="accountError"></div>
@@ -1202,6 +1341,22 @@
     </form>
   </div>
 </div>
+
+<div id="emailOverlay">
+  <div class="account-modal">
+    <h2>One quick thing 📧</h2>
+    <div class="sub">Every ThinkStep account needs an email now. It's how you get back in if you ever forget your password.</div>
+    <form id="emailForm">
+      <label for="emailInput">Your email</label>
+      <input id="emailInput" type="email" autocomplete="email" maxlength="254" required />
+      <div class="error-msg" id="emailError"></div>
+      <button type="submit" class="submit-btn" id="emailSaveBtn">Save</button>
+    </form>
+    <div class="switch-mode"><button type="button" id="emailLogout">Log out instead</button></div>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
 
 <div id="photoViewer">
   <button type="button" class="pv-close" id="photoViewerClose" title="Close">✕</button>
@@ -1238,6 +1393,501 @@ const sendBtn = document.getElementById('send');
 // There's one tutor model now (the smartest one), so no picker. The server
 // decides the model anyway; this is only sent for clarity.
 const CHAT_MODEL = 'openai/gpt-oss-120b';
+
+/* =====================================================================
+   Night mode — a soft navy theme. Remembers the choice on this device.
+   ===================================================================== */
+const themeToggle = document.getElementById('themeToggle');
+function syncThemeButton() {
+  const dark = document.documentElement.dataset.theme === 'dark';
+  themeToggle.textContent = dark ? '☀️' : '🌙';
+  themeToggle.title = dark ? 'Day mode' : 'Night mode';
+  themeToggle.setAttribute('aria-label', themeToggle.title);
+}
+themeToggle.addEventListener('click', () => {
+  const dark = document.documentElement.dataset.theme !== 'dark';
+  if (dark) document.documentElement.dataset.theme = 'dark';
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem('thinkstep_theme', dark ? 'dark' : 'light'); } catch {}
+  syncThemeButton();
+});
+syncThemeButton();
+
+/* =====================================================================
+   Little toast at the bottom — used for badges and quiz results.
+   ===================================================================== */
+const toastEl = document.getElementById('toast');
+const toastQueue = [];
+let toastBusy = false;
+function showToast(text, ms = 3200) {
+  toastQueue.push([text, ms]);
+  if (!toastBusy) nextToast();
+}
+function nextToast() {
+  const item = toastQueue.shift();
+  if (!item) { toastBusy = false; return; }
+  toastBusy = true;
+  toastEl.textContent = item[0];
+  toastEl.classList.add('show');
+  setTimeout(() => {
+    toastEl.classList.remove('show');
+    setTimeout(nextToast, 380);
+  }, item[1]);
+}
+
+/* =====================================================================
+   Badges — quiet rewards. Earned ones glow softly on the Progress card;
+   the rest wait as faint outlines. Saved per person, like chats.
+   ===================================================================== */
+const BADGE_DEFS = [
+  { id: 'first',   icon: '🌱', name: 'First Step',      how: 'Ask your first question' },
+  { id: 'streak3', icon: '🔥', name: '3-Day Streak',    how: 'Practice 3 days in a row' },
+  { id: 'streak7', icon: '🌟', name: '7-Day Streak',    how: 'Practice 7 days in a row' },
+  { id: 'q10',     icon: '💡', name: '10 Questions',    how: 'Work through 10 questions' },
+  { id: 'q50',     icon: '🧠', name: '50 Questions',    how: 'Work through 50 questions' },
+  { id: 'q100',    icon: '🏔️', name: '100 Questions',   how: 'Work through 100 questions' },
+  { id: 'photo',   icon: '📸', name: 'Snapshot',        how: 'Get help with a homework photo' },
+  { id: 'quiz',    icon: '🎯', name: 'Quiz Whiz',       how: 'Finish a quiz' },
+  { id: 'perfect', icon: '💯', name: 'Perfect Quiz',    how: 'Get every quiz question right' },
+  { id: 'listen',  icon: '🎧', name: 'Good Listener',   how: 'Have an answer read out loud' },
+  { id: 'focus',   icon: '⏱️', name: 'Focus Finisher',  how: 'Finish a focus timer' },
+];
+function myBadges() {
+  try { return JSON.parse(pGet('badges') || '[]'); } catch { return []; }
+}
+function renderBadges(freshId) {
+  const have = new Set(myBadges());
+  const shelf = document.getElementById('badgeShelf');
+  shelf.innerHTML = '';
+  BADGE_DEFS.forEach(b => {
+    const el = document.createElement('span');
+    el.className = 'badge' + (have.has(b.id) ? '' : ' locked') + (b.id === freshId ? ' fresh' : '');
+    el.textContent = b.icon;
+    el.title = have.has(b.id) ? `${b.name} — earned!` : `${b.name}: ${b.how}`;
+    shelf.appendChild(el);
+  });
+  document.getElementById('badgeCount').textContent =
+    have.size ? `${have.size} of ${BADGE_DEFS.length} badges` : 'Badges to earn — hover to see how';
+}
+function earnBadge(id) {
+  const have = myBadges();
+  const def = BADGE_DEFS.find(b => b.id === id);
+  if (!def || have.includes(id)) return;
+  have.push(id);
+  pSet('badges', JSON.stringify(have));
+  renderBadges(id);
+  showToast(`${def.icon} New badge: ${def.name}`);
+  if (currentUser) {
+    fetch('/api/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'badge', id }) }).catch(() => {});
+  }
+}
+function checkProgressBadges() {
+  const n = parseInt(pGet('problems') || '0', 10);
+  const streak = parseInt(pGet('streak') || '0', 10);
+  if (n >= 1) earnBadge('first');
+  if (n >= 10) earnBadge('q10');
+  if (n >= 50) earnBadge('q50');
+  if (n >= 100) earnBadge('q100');
+  if (streak >= 3) earnBadge('streak3');
+  if (streak >= 7) earnBadge('streak7');
+}
+
+/* =====================================================================
+   Quiz mode. The tutor offers a quiz when the student is doing well
+   (it adds [[QUIZ_OFFER]]); the student picks how many questions; the
+   tutor marks each answer [[RIGHT]] / [[WRONG]] and ends with
+   [[QUIZ_DONE]]. Those tags are never shown — the page counts them.
+   ===================================================================== */
+const TAG_RE = /\[\[(QUIZ_OFFER|RIGHT|WRONG|QUIZ_DONE)\]\]/g;
+function stripTags(text) {
+  // also hides a tag that's only half-arrived while the reply streams in
+  return (text || '').replace(TAG_RE, '').replace(/\[\[?[A-Z_]{0,10}\]?$/, '').replace(/[ \t]+\n/g, '\n');
+}
+function readTags(text) {
+  const t = { offer: false, right: 0, wrong: 0, done: false };
+  for (const m of (text || '').matchAll(TAG_RE)) {
+    if (m[1] === 'QUIZ_OFFER') t.offer = true;
+    else if (m[1] === 'RIGHT') t.right++;
+    else if (m[1] === 'WRONG') t.wrong++;
+    else t.done = true;
+  }
+  return t;
+}
+const quizPill = document.getElementById('quizPill');
+function renderQuizPill() {
+  const q = getActive().quiz;
+  if (!q) { quizPill.classList.remove('show'); return; }
+  document.getElementById('quizPillText').textContent =
+    `🎯 Quiz · ${Math.min(q.answered + 1, q.total)} of ${q.total} · ✓ ${q.right}`;
+  quizPill.classList.add('show');
+}
+document.getElementById('quizStop').addEventListener('click', () => {
+  const active = getActive();
+  delete active.quiz;
+  saveChats(chats);
+  renderQuizPill();
+});
+function finishQuiz(active) {
+  const q = active.quiz;
+  delete active.quiz;
+  renderQuizPill();
+  if (!q || q.answered === 0) return;
+  showToast(`🎯 Quiz done: ${q.right} of ${q.answered} right!`, 4200);
+  earnBadge('quiz');
+  if (q.answered === q.total && q.right === q.total) earnBadge('perfect');
+  if (currentUser) {
+    fetch('/api/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'quiz', total: q.answered, right: q.right }) }).catch(() => {});
+  }
+}
+function handleQuizTags(active, tags, aiDiv) {
+  if (active.quiz) {
+    const q = active.quiz;
+    const marked = Math.min(tags.right + tags.wrong, q.total - q.answered);
+    q.right += Math.min(tags.right, marked);
+    q.answered += marked;
+    if (tags.done || q.answered >= q.total) finishQuiz(active);
+    else renderQuizPill();
+    return;
+  }
+  if (tags.offer) addQuizOffer(aiDiv);
+}
+function addQuizOffer(aiDiv) {
+  const box = document.createElement('div');
+  box.className = 'quiz-offer';
+  box.innerHTML = '<span class="lbl">Quiz me:</span>';
+  [3, 5, 10].forEach(n => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'quiz-chip';
+    b.textContent = `${n} questions`;
+    b.addEventListener('click', () => {
+      if (busy) return;
+      box.remove();
+      const active = getActive();
+      active.quiz = { total: n, answered: 0, right: 0 };
+      saveChats(chats);
+      renderQuizPill();
+      sendMessage(`Yes! Quiz me with ${n} questions.`);
+    });
+    box.appendChild(b);
+  });
+  const no = document.createElement('button');
+  no.type = 'button'; no.className = 'quiz-chip ghost'; no.textContent = 'Not now';
+  no.addEventListener('click', () => box.remove());
+  box.appendChild(no);
+  aiDiv.appendChild(box);
+  scrollToBottom(false);
+}
+
+/* =====================================================================
+   Read aloud.
+   1) ThinkStep's HD voices (Groq "Orpheus") — very human.
+   2) When those are resting (the free plan has a daily limit), an AI
+      voice that runs right on this device (Kokoro) — also very human.
+      It downloads once (~90 MB), so the device's own voice fills in
+      while it gets ready.
+   3) The device's built-in voice, picked to be the most natural one.
+   ===================================================================== */
+const VOICE_CHOICES = {
+  girl: [['hannah', 'Hannah'], ['autumn', 'Autumn'], ['diana', 'Diana']],
+  boy:  [['troy', 'Troy'], ['austin', 'Austin'], ['daniel', 'Daniel']],
+};
+const KOKORO_VOICE = { hannah: 'af_heart', autumn: 'af_bella', diana: 'af_nicole',
+                       troy: 'am_michael', austin: 'am_fenrir', daniel: 'am_puck' };
+const KOKORO_URL = 'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js';
+const voiceSelect = document.getElementById('voiceSelect');
+const voiceNote = document.getElementById('voiceNote');
+const autoReadBox = document.getElementById('autoRead');
+
+function lsGet(k, d) { try { return localStorage.getItem(k) || d; } catch { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+function voiceGender() { return lsGet('thinkstep_voice_gender', 'girl') === 'boy' ? 'boy' : 'girl'; }
+function currentVoice() {
+  const g = voiceGender();
+  const v = lsGet('thinkstep_voice_' + g, VOICE_CHOICES[g][0][0]);
+  return VOICE_CHOICES[g].some(([id]) => id === v) ? v : VOICE_CHOICES[g][0][0];
+}
+function autoReadOn() { return lsGet('thinkstep_autoread', '') === '1'; }
+function renderVoiceSettings() {
+  const g = voiceGender();
+  document.querySelectorAll('.voice-btn').forEach(b => b.classList.toggle('active', b.dataset.gender === g));
+  voiceSelect.innerHTML = VOICE_CHOICES[g].map(([id, label]) => `<option value="${id}">${label}</option>`).join('');
+  voiceSelect.value = currentVoice();
+  autoReadBox.checked = autoReadOn();
+}
+document.querySelectorAll('.voice-btn').forEach(b => b.addEventListener('click', () => {
+  lsSet('thinkstep_voice_gender', b.dataset.gender);
+  renderVoiceSettings();
+  stopSpeaking();
+}));
+voiceSelect.addEventListener('change', () => { lsSet('thinkstep_voice_' + voiceGender(), voiceSelect.value); stopSpeaking(); });
+autoReadBox.addEventListener('change', () => lsSet('thinkstep_autoread', autoReadBox.checked ? '1' : ''));
+document.getElementById('voiceSample').addEventListener('click', (e) => {
+  const name = voiceSelect.options[voiceSelect.selectedIndex].textContent;
+  speakMessage(`Hi! I'm ${name}. Let's figure it out together, one step at a time.`, e.currentTarget);
+});
+renderVoiceSettings();
+
+// Turn a reply into words that sound right out loud.
+function speakableText(text) {
+  let t = stripTags(text || '').replace(/🔎 I checked the web for this\./g, '');
+  t = tidyMath(t).replace(/²/g, ' squared').replace(/³/g, ' cubed');
+  t = t.replace(/\p{Extended_Pictographic}|️|‍/gu, '');
+  t = t.replace(/sqrt\(([^()]*)\)|√\s*\(?([\w.]+)\)?/g, (m, a, b) => ` the square root of ${a || b} `);
+  t = t.replace(/\(?([\w.]+)\)?\s*\/\s*\(?([\w.]+)\)?/g, (m, a, b) =>
+    /\d/.test(a + b) ? ` ${a} over ${b} ` : m);
+  t = t.replace(/(\w)\s*\^\s*2\b/g, '$1 squared').replace(/(\w)\s*\^\s*3\b/g, '$1 cubed')
+       .replace(/(\w)\s*\^\s*(\w+)/g, '$1 to the power of $2');
+  t = t.replace(/(\d)\s*[x×*]\s*(?=\d)/g, '$1 times ')
+       .replace(/÷/g, ' divided by ')
+       .replace(/(\d)\s*-\s*(?=\d)/g, '$1 minus ')
+       .replace(/\+/g, ' plus ').replace(/=/g, ' equals ')
+       .replace(/(\d)\s*%/g, '$1 percent').replace(/≤/g, ' is less than or equal to ')
+       .replace(/≥/g, ' is greater than or equal to ').replace(/</g, ' is less than ')
+       .replace(/>/g, ' is greater than ').replace(/[*_#`~|]/g, '');
+  return t.replace(/\s+/g, ' ').trim();
+}
+// Short pieces (the HD voice takes up to 200 characters at a time),
+// split at sentence ends so it never pauses mid-thought.
+function chunkForSpeech(text, max = 190) {
+  const out = [];
+  const sentences = text.match(/[^.!?]+[.!?]*\s*/g) || [text];
+  let cur = '';
+  const push = s => { s = s.trim(); if (s) out.push(s); };
+  for (let s of sentences) {
+    while (s.length > max) {   // a very long sentence: split at a comma or space
+      let cut = s.lastIndexOf(', ', max);
+      if (cut < max / 3) cut = s.lastIndexOf(' ', max);
+      if (cut < 1) cut = max;
+      push(cur); cur = '';
+      push(s.slice(0, cut + 1));
+      s = s.slice(cut + 1);
+    }
+    if ((cur + s).length > max) { push(cur); cur = s; }
+    else cur += s;
+  }
+  push(cur);
+  return out;
+}
+
+const speechAudio = new Audio();
+let speechToken = 0;
+let speakingBtn = null;
+let hdRestingUntil = 0;
+let kokoroTTS = null, kokoroLoading = null, kokoroFailed = false;
+
+// Phones only let a page play sound after a tap, so the first tap anywhere
+// quietly "unlocks" the speaker for answers that read themselves later.
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+function unlockAudio() {
+  speechAudio.src = SILENT_WAV;
+  speechAudio.play().catch(() => {});
+  window.removeEventListener('pointerdown', unlockAudio, true);
+  window.removeEventListener('keydown', unlockAudio, true);
+}
+window.addEventListener('pointerdown', unlockAudio, true);
+window.addEventListener('keydown', unlockAudio, true);
+
+function setVoiceNote(text) { voiceNote.textContent = text || ''; }
+function loadKokoro() {
+  if (kokoroLoading || kokoroFailed) return kokoroLoading;
+  setVoiceNote('Getting the on-device HD voice ready (one-time download)…');
+  kokoroLoading = (async () => {
+    const { KokoroTTS } = await import(KOKORO_URL);
+    const device = navigator.gpu ? 'webgpu' : 'wasm';
+    kokoroTTS = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX',
+      { dtype: device === 'webgpu' ? 'fp32' : 'q8', device });
+    setVoiceNote('Using the on-device HD voice.');
+    return kokoroTTS;
+  })().catch(err => {
+    console.warn('On-device voice unavailable:', err);
+    kokoroFailed = true;
+    setVoiceNote('Using this device’s built-in voice.');
+    return null;
+  });
+  return kokoroLoading;
+}
+
+async function hdAudio(text, voice) {
+  if (Date.now() < hdRestingUntil) return null;
+  try {
+    const res = await fetchWithTimeout('/api/speak', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice }),
+    }, 25000);
+    if (res.ok && (res.headers.get('content-type') || '').includes('audio')) return await res.blob();
+    let reason = '';
+    try { reason = (await res.json()).reason || ''; } catch {}
+    hdRestingUntil = Date.now() + (reason === 'daily_limit' ? 30 * 60000 : 2 * 60000);
+  } catch {
+    hdRestingUntil = Date.now() + 60000;
+  }
+  return null;
+}
+
+// Gets ONE piece ready to play: { blob } or { builtin: text }.
+async function prepareChunk(text, voice) {
+  const blob = await hdAudio(text, voice);
+  if (blob) { setVoiceNote(''); return { blob }; }
+  if (kokoroTTS) {
+    try {
+      const audio = await kokoroTTS.generate(text, { voice: KOKORO_VOICE[voice] });
+      return { blob: audio.toBlob() };
+    } catch (e) { console.warn(e); }
+  } else {
+    loadKokoro();  // fills in for next time; the built-in voice reads this piece
+  }
+  return { builtin: text };
+}
+
+function playBlob(blob, token) {
+  return new Promise(resolve => {
+    if (token !== speechToken) return resolve();
+    const url = URL.createObjectURL(blob);
+    const done = () => { URL.revokeObjectURL(url); speechAudio.onended = speechAudio.onerror = null; resolve(); };
+    speechAudio.onended = done;
+    speechAudio.onerror = done;
+    speechAudio.src = url;
+    speechAudio.play().catch(done);
+  });
+}
+
+function pickBuiltinVoice(gender) {
+  const voices = (window.speechSynthesis && speechSynthesis.getVoices()) || [];
+  const en = voices.filter(v => /^en(-|_|$)/i.test(v.lang));
+  const GIRL = /aria|jenny|ava|emma|michelle|libby|sonia|natasha|samantha|zira|susan|karen|moira|tessa|allison|joanna|salli|kendra|female|google us english/i;
+  const BOY = /guy|davis|andrew|brian|christopher|eric|roger|steffan|ryan|thomas|daniel|alex|david|mark|george|fred|male/i;
+  const want = gender === 'boy' ? BOY : GIRL;
+  const score = v => (/(natural|neural|online|premium|enhanced)/i.test(v.name) ? 10 : 0)
+    + (/google|siri/i.test(v.name) ? 4 : 0) + (want.test(v.name) ? 6 : 0)
+    + (/en-us/i.test(v.lang) ? 1 : 0) - (gender === 'girl' && BOY.test(v.name) && !GIRL.test(v.name) ? 8 : 0)
+    - (gender === 'boy' && /female/i.test(v.name) ? 8 : 0);
+  return en.sort((a, b) => score(b) - score(a))[0] || null;
+}
+function speakBuiltin(text, token) {
+  return new Promise(resolve => {
+    if (token !== speechToken || !window.speechSynthesis) return resolve();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = pickBuiltinVoice(voiceGender());
+    if (v) u.voice = v;
+    u.rate = 0.98;
+    u.onend = u.onerror = () => resolve();
+    speechSynthesis.speak(u);
+  });
+}
+
+function stopSpeaking() {
+  speechToken++;
+  try { speechAudio.pause(); } catch {}
+  try { window.speechSynthesis && speechSynthesis.cancel(); } catch {}
+  if (speakingBtn) { speakingBtn.classList.remove('playing', 'loading'); speakingBtn.textContent = '🔊'; }
+  speakingBtn = null;
+}
+
+async function speakMessage(text, btn) {
+  const wasThis = btn && btn === speakingBtn;
+  stopSpeaking();
+  if (wasThis) return;            // second tap = stop
+  const token = speechToken;
+  const chunks = chunkForSpeech(speakableText(text));
+  if (!chunks.length) return;
+  speakingBtn = btn || null;
+  if (btn) { btn.classList.add('loading'); if (btn.classList.contains('say-btn')) btn.textContent = '⏹'; }
+  earnBadge('listen');
+  const voice = currentVoice();
+  let next = prepareChunk(chunks[0], voice);
+  for (let i = 0; i < chunks.length; i++) {
+    const piece = await next;
+    if (token !== speechToken) return;
+    if (i + 1 < chunks.length) next = prepareChunk(chunks[i + 1], voice);  // get the next one ready while this plays
+    if (btn) { btn.classList.remove('loading'); btn.classList.add('playing'); }
+    if (piece.blob) await playBlob(piece.blob, token);
+    else await speakBuiltin(piece.builtin, token);
+    if (token !== speechToken) return;
+  }
+  if (token === speechToken) stopSpeaking();
+}
+
+function attachSayButton(div, text) {
+  if (!text || div.querySelector(':scope > .say-btn')) return;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'say-btn';
+  b.textContent = '🔊';
+  b.title = 'Read this out loud';
+  b.setAttribute('aria-label', 'Read this out loud');
+  b.addEventListener('click', () => speakMessage(text, b));
+  div.appendChild(b);
+}
+
+/* =====================================================================
+   Account extras: every account needs an email, and 13+ students can
+   choose progress emails for themselves.
+   ===================================================================== */
+function userFromServer(r) {
+  return { name: r.name, grade: r.grade || '', under13: !!r.under13,
+           reportFreq: r.reportFreq || 'never', needsEmail: !!r.needsEmail };
+}
+const emailOverlay = document.getElementById('emailOverlay');
+const emailForm = document.getElementById('emailForm');
+const emailInput = document.getElementById('emailInput');
+const emailError = document.getElementById('emailError');
+function openEmailModal() {
+  emailError.classList.remove('show');
+  emailOverlay.classList.add('open');
+  setTimeout(() => emailInput.focus(), 50);
+}
+emailForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  emailError.classList.remove('show');
+  const btn = document.getElementById('emailSaveBtn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/set-email', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: emailInput.value.trim() }) });
+    const r = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(r.error || 'Something went wrong — try again.');
+    if (currentUser) currentUser.needsEmail = false;
+    emailOverlay.classList.remove('open');
+    showToast('📧 Email saved — thanks!');
+  } catch (err) {
+    emailError.textContent = err.message;
+    emailError.classList.add('show');
+  } finally {
+    btn.disabled = false;
+  }
+});
+document.getElementById('emailLogout').addEventListener('click', async () => {
+  emailOverlay.classList.remove('open');
+  await logoutUser();
+});
+
+function reportSettingHtml() {
+  if (!currentUser) return '';
+  if (currentUser.under13) {
+    return '<div class="report-row">📬 Your parent chooses how often they get progress emails.</div>';
+  }
+  const opts = [['never', 'Off'], ['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month']]
+    .map(([v, l]) => `<option value="${v}"${currentUser.reportFreq === v ? ' selected' : ''}>${l}</option>`).join('');
+  return `<div class="report-row">📬 Progress emails<select id="reportFreq" class="voice-select">${opts}</select></div>`;
+}
+function wireReportSetting() {
+  const sel = document.getElementById('reportFreq');
+  if (!sel) return;
+  sel.addEventListener('change', async () => {
+    try {
+      const res = await fetch('/api/my-report-settings', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ freq: sel.value }) });
+      if (!res.ok) throw new Error();
+      currentUser.reportFreq = sel.value;
+      showToast(sel.value === 'never' ? '📬 Progress emails off' : '📬 Progress emails saved');
+    } catch {
+      sel.value = currentUser.reportFreq;
+      showToast("Couldn't save that — try again in a moment.");
+    }
+  });
+}
 const chatListEl = document.getElementById('chatList');
 const newChatBtn = document.getElementById('newChatBtn');
 const explainBtn = document.getElementById('explainBtn');
@@ -1370,6 +2020,7 @@ function syncAgeGateToGrade() {
   parentEmailWrap.style.display = accIs13.checked ? 'none' : 'block';
   accParentEmail.required = !accIs13.checked;
   recoveryEmailWrap.style.display = accIs13.checked ? 'block' : 'none';
+  accRecoveryEmail.required = accIs13.checked;
 }
 
 accGrade.addEventListener('change', syncAgeGateToGrade);
@@ -1378,6 +2029,7 @@ accIs13.addEventListener('change', () => {
   parentEmailWrap.style.display = under13 ? 'block' : 'none';
   accParentEmail.required = under13;
   recoveryEmailWrap.style.display = under13 ? 'none' : 'block';
+  accRecoveryEmail.required = !under13;
 });
 
 let accountModalMode = 'signup'; // 'signup' | 'login'
@@ -1390,6 +2042,7 @@ function openAccountModal(mode) {
   parentEmailWrap.style.display = 'none';
   accParentEmail.required = false;
   recoveryEmailWrap.style.display = 'none';
+  accRecoveryEmail.required = false;
   accIs13.disabled = false;
   is13Hint.style.display = 'none';
   if (mode === 'signup') {
@@ -1468,10 +2121,11 @@ accountForm.addEventListener('submit', async (e) => {
       alert(msg);
       return;
     }
-    currentUser = { name: result.name, grade: result.grade || '' };
+    currentUser = userFromServer(result);
     switchStorageOwner(currentUser);
     closeAccountModal();
     renderAccountStatus();
+    if (result.needsEmail) openEmailModal();
     renderFormulaSheet(currentUser.grade);
     if (!getActive().messages.length) renderEmptyState();
   } catch (err) {
@@ -1572,7 +2226,8 @@ async function deleteAccountFlow() {
 
 function renderAccountStatus() {
   if (currentUser) {
-    accountStatusEl.innerHTML = `Signed in as <strong>${escapeHtml(currentUser.name)}</strong><br><span style="color:var(--muted); font-size: 12.5px;">Grade ${escapeHtml(currentUser.grade || '—')}</span>`;
+    accountStatusEl.innerHTML = `Signed in as <strong>${escapeHtml(currentUser.name)}</strong><br><span style="color:var(--muted); font-size: 12.5px;">Grade ${escapeHtml(currentUser.grade || '—')}</span>` + reportSettingHtml();
+    wireReportSetting();
     if (!document.getElementById('logoutBtn')) {
       accountButtonsEl.innerHTML = `
         <button type="button" id="logoutBtn" class="secondary">Log Out</button>
@@ -1623,11 +2278,12 @@ async function initAccount() {
     const res = await fetchWithTimeout('/api/me', { cache: 'no-store' });
     const m = await res.json();
     if (m.loggedIn) {
-      currentUser = { name: m.name, grade: m.grade || '' };
+      currentUser = userFromServer(m);
     }
   } catch {}
   switchStorageOwner(currentUser);
   renderAccountStatus();
+  if (currentUser && currentUser.needsEmail) openEmailModal();
   renderFormulaSheet(currentUser ? currentUser.grade : '');
 }
 
@@ -1915,6 +2571,8 @@ function showAiText(el, text) {
 
 function renderMessages() {
   const active = getActive();
+  stopSpeaking();
+  renderQuizPill();
   chat.innerHTML = '';
   jumpDownBtn.classList.remove('show');
   if (!active.messages.length) {
@@ -1960,7 +2618,10 @@ function addMessage(role, text, msg) {
     // Only the AI's replies need math tidying — whatever the student typed
     // should always be shown back to them exactly as they wrote it.
     if (role === 'user') div.textContent = text;
-    else showAiText(div, text);
+    else {
+      showAiText(div, text);
+      if (text) attachSayButton(div, text);
+    }
   }
   chat.appendChild(div);
   scrollToBottom(true);
@@ -2018,10 +2679,13 @@ function bumpProblemsCount() {
   const n = parseInt(pGet('problems') || '0', 10) + 1;
   pSet('problems', String(n));
   document.getElementById('problemsNum').textContent = n;
+  checkProgressBadges();
 }
 function renderProgress() {
   updateStreak();
   document.getElementById('problemsNum').textContent = pGet('problems') || '0';
+  renderBadges();
+  checkProgressBadges();
 }
 
 /* ---------- Export summary ---------- */
@@ -2515,7 +3179,7 @@ async function sendMessage(text) {
           ...(m.photo && m.photo.notes ? { photoNotes: m.photo.notes } : {}),
         })),
         ...(photo ? { image: photo.big, imageSize: [photo.bw, photo.bh] } : {}),
-        profile: { difficulty: currentDifficulty },
+        profile: { difficulty: currentDifficulty, ...(active.quiz ? { quiz: active.quiz } : {}) },
       })
     });
 
@@ -2568,7 +3232,7 @@ async function sendMessage(text) {
       const shown = full.replace(/\x03[\s\S]*?(\x03|$)/, '');
       if (!shown) continue;  // only the photo data so far — keep the dots going
       clearTimeout(slowNoteTimer);
-      showAiText(aiDiv, shown.replace(/\x02/g, ''));
+      showAiText(aiDiv, stripTags(shown.replace(/\x02/g, '')));
       scrollToBottom(false);
     }
     clearTimeout(slowNoteTimer);
@@ -2579,14 +3243,21 @@ async function sendMessage(text) {
     // would later read them as if the tutor had said them — and never
     // counted as a solved problem.
     const noticeAt = full.indexOf('\x02');
-    const answer = (noticeAt === -1 ? full : full.slice(0, noticeAt)).trim();
+    const rawAnswer = (noticeAt === -1 ? full : full.slice(0, noticeAt)).trim();
+    const tags = readTags(rawAnswer);
+    const answer = stripTags(rawAnswer).trim();
+    if (answer && answer !== rawAnswer) showAiText(aiDiv, answer + (noticeAt === -1 ? '' : full.slice(noticeAt).replace(/\x02/g, '')));
     if (noticeAt !== -1) aiDiv.classList.toggle('notice', !answer);
     if (!full) {
       aiDiv.textContent = "Hmm, no response came through — try asking again.";
     } else if (answer) {
       active.messages.push({ role: 'assistant', content: answer });
+      handleQuizTags(active, tags, aiDiv);
       saveChats(chats);
       bumpProblemsCount();
+      if (photo) earnBadge('photo');
+      attachSayButton(aiDiv, answer);
+      if (autoReadOn()) speakMessage(answer, aiDiv.querySelector('.say-btn'));
       if (!currentUser) refreshGuestStatus(); // keep the "X free questions left" count live
     } else {
       // Nothing was really answered: take the question back out of the saved
@@ -2770,6 +3441,7 @@ function timerFinished() {
   timerDisplay.textContent = 'Break time! 🎉';
   timerDisplay.classList.add('done');
   playChime();
+  earnBadge('focus');
   setTimeout(() => {
     timerDisplay.classList.remove('done');
     timerSeconds = DEFAULT_TIMER_SECONDS;
