@@ -279,7 +279,7 @@
       <div id="safetyFlagsList"><div class="empty-note">Loading…</div></div>
     </div>
 
-    <div class="refresh-note">Updates automatically every few seconds.</div>
+    <div class="refresh-note" id="refreshNote">Updates live, every 2 seconds.</div>
   </div>
 </main>
 
@@ -330,15 +330,34 @@ function showDashboard() {
   loginCard.style.display = 'none';
   dashboard.style.display = 'block';
   fetchAll();
-  if (!pollTimer) pollTimer = setInterval(fetchAll, 5000);
+  if (!pollTimer) pollTimer = setInterval(fetchAll, REFRESH_MS);
 }
 
-function fetchAll() {
-  fetchOnline();
-  fetchStats();
-  fetchAllAccounts();
-  fetchSafetyFlags();
+// Refreshes every 2 seconds while this tab is open (and right away when you
+// come back to it). Skips a round if the last one hasn't finished yet.
+const REFRESH_MS = 2000;
+let fetching = false;
+let lastUpdated = 0;
+async function fetchAll() {
+  if (fetching || document.hidden || dashboard.style.display === 'none') return;
+  fetching = true;
+  try {
+    await Promise.all([fetchOnline(), fetchStats(), fetchAllAccounts(), fetchSafetyFlags()]);
+    lastUpdated = Date.now();
+    showUpdated();
+  } finally {
+    fetching = false;
+  }
 }
+function showUpdated() {
+  const el = document.getElementById('refreshNote');
+  if (!lastUpdated) return;
+  const s = Math.round((Date.now() - lastUpdated) / 1000);
+  el.textContent = s < 3 ? '🟢 Live — updated just now' : `Updated ${s} seconds ago`;
+}
+setInterval(showUpdated, 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) fetchAll(); });
+window.addEventListener('focus', fetchAll);
 
 async function fetchAllAccounts() {
   try {
