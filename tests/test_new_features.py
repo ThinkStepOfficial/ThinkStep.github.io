@@ -117,77 +117,106 @@ def test_under_13_accounts_use_the_parent_email(app_module, client):
     assert client.post("/api/set-email", json={"email": "kid@example.com"}).status_code == 403
 
 
-# ---------- parents choose how often ----------
+# ---------- parent dashboard (replaced the progress emails) ----------
 
-def test_approving_shows_the_email_choice_and_saving_it_works(app_module, client):
+def test_approving_gives_the_parent_a_dashboard_link_and_one_email(app_module, client, monkeypatch):
+    sent = []
+    monkeypatch.setattr(app_module, "send_email", lambda to, subj, body: sent.append((to, subj, body)) or True)
     make_account(client, "Sam Small", "3", "password1", is13=False, parent_email="dad@example.com")
     key = "sam small"
     tokens = app_module._load_consent_tokens()
     token = next(t for t, v in tokens.items() if v["user_key"] == key)
     page = client.post(f"/api/consent/{token}").get_data(as_text=True)
     assert "account approved" in page.lower()
-    assert "every week" in page.lower() and "no emails" in page.lower()
     report_token = app_module._load_users()[key]["report_token"]
-    assert f"/api/report-settings/{report_token}" in page
-
-    # just visiting the link (email scanners do that) changes nothing
-    assert client.get(f"/api/report-settings/{report_token}").status_code == 200
-    assert "report_freq" not in app_module._load_users()[key]
-
-    res = client.post(f"/api/report-settings/{report_token}", data={"freq": "weekly"})
-    assert "every week" in res.get_data(as_text=True)
-    assert app_module._load_users()[key]["report_freq"] == "weekly"
-    assert client.post(f"/api/report-settings/{report_token}", data={"freq": "hourly"}).status_code == 200
-    assert app_module._load_users()[key]["report_freq"] == "weekly"
-    assert "link isn" in client.get("/api/report-settings/not-a-real-token").get_data(as_text=True)
+    assert f"/progress/{report_token}" in page
+    link_emails = [m for m in sent if m[0] == "dad@example.com" and "progress" in m[1].lower()]
+    assert len(link_emails) == 1 and f"/progress/{report_token}" in link_emails[0][2]
 
 
-def test_kids_under_13_cant_change_their_parents_choice(app_module, client):
+def test_dashboard_shows_counts_only(app_module, client):
+    make_account(client, "Rae", "3", "password1", is13=False, parent_email="rae.parent@example.com")
+    grant_consent(app_module, client, "Rae")
+    app_module.record_activity("rae", questions=7, photos=1, checks=1)
+    app_module.record_activity("rae", quiz={"total": 5, "right": 4})
+    app_module.record_activity("rae", badge="quiz")
+    token = app_module._load_users()["rae"]["report_token"]
+    page = client.get(f"/progress/{token}").get_data(as_text=True)
+    assert "Rae&#x27;s progress" in page or "Rae's progress" in page
+    assert ">7<" in page and "4/5" in page and "Quiz Whiz" in page and "work checks" in page
+    assert 'name="robots" content="noindex' in page
+    assert "link isn" in client.get("/progress/not-a-real-token").get_data(as_text=True)
+
+
+def test_old_email_links_open_the_dashboard(client):
+    res = client.get("/api/report-settings/abc123")
+    assert res.status_code == 302 and res.headers["Location"].endswith("/progress/abc123")
+
+
+def test_no_more_scheduled_progress_emails(app_module):
+    assert not hasattr(app_module, "send_due_reports")
+    assert not hasattr(app_module, "start_report_thread")
+
+
+def test_13_plus_students_can_open_their_own_progress_page(app_module, client):
+    make_account(client, "Teen Tia", "9", "password1")
+    assert client.get("/api/me").get_json()["hasProgressPage"] is True
+    url = client.get("/api/my-progress").get_json()["url"]
+    assert client.get(url).status_code == 200
+
+
+def test_kids_under_13_get_no_progress_link_their_parent_has_it(app_module, client):
     make_account(client, "Kit", "2", "password1", is13=False, parent_email="p@example.com")
     grant_consent(app_module, client, "Kit")
     client.post("/api/login", json={"name": "Kit", "password": "password1"})
-    assert client.post("/api/my-report-settings", json={"freq": "never"}).status_code == 403
+    assert client.get("/api/me").get_json()["hasProgressPage"] is False
+    assert client.get("/api/my-progress").status_code == 403
 
 
-def test_progress_email_is_sent_when_due_with_counts_only(app_module, client, monkeypatch):
-    make_account(client, "Rae", "3", "password1", is13=False, parent_email="rae.parent@example.com")
-    grant_consent(app_module, client, "Rae")
-    users = app_module._load_users()
-    app_module._set_report_freq(users["rae"], "weekly")
-    app_module._save_users(users)
-    app_module.record_activity("rae", questions=7, photos=1)
-    app_module.record_activity("rae", quiz={"total": 5, "right": 4})
-    app_module.record_activity("rae", badge="quiz")
+# ---------- step checker + explain simple ----------
 
-    sent = []
-    monkeypatch.setattr(app_module, "send_email", lambda to, subj, body: sent.append((to, subj, body)) or True)
-    now = datetime.now(timezone.utc)
-    assert app_module.send_due_reports(now) == 0               # not a week yet
-    assert app_module.send_due_reports(now + timedelta(days=7, minutes=1)) == 1
-    to, subj, body = sent[0]
-    assert to == "rae.parent@example.com" and "Rae" in subj
-    assert "Questions worked on: 7" in body and "4 of 5" in body and "Quiz Whiz" in body
-    assert "/api/report-settings/" in body
-    assert app_module.send_due_reports(now + timedelta(days=8)) == 0   # not again so soon
+def test_check_my_work_finds_the_first_wrong_step(app_module, client, monkeypatch):
+    reading = {"appropriate": True, "homework": True, "notes": "2/3 - 1/6",
+               "problems": [{"label": "Problem 3", "box": [70, 160, 910, 330]}], "focus": 0,
+               "steps": [{"text": "2/3 = 4/6", "box": [100, 200, 600, 240]},
+                         {"text": "4/6 - 1/6 = 3/0", "box": [100, 250, 600, 290]},
+                         {"text": "", "box": [1, 2, 3]}],
+               "first_error": 1, "error_note": "subtracted the bottom numbers"}
+    seen = {"vision": None, "tutor": None}
+
+    def fake_post(url, headers=None, json=None, stream=None, timeout=None):
+        msgs = (json or {}).get("messages", [])
+        if any(isinstance(m.get("content"), list) for m in msgs):
+            seen["vision"] = json
+            r = _Resp(); r.json = lambda: {"choices": [{"message": {"content": __import__("json").dumps(reading)}}]}
+            return r
+        if not stream:
+            return _Resp()
+        seen["tutor"] = json
+        line = "data: " + __import__("json").dumps({"choices": [{"delta": {"content": "Nice!"}, "finish_reason": "stop"}]})
+        return _Resp(lines=[line, "data: [DONE]"])
+
+    monkeypatch.setattr(app_module.requests, "post", fake_post)
+    monkeypatch.setattr(app_module, "_load_groq_api_key", lambda: "test-key-not-real")
+    img = "data:image/jpeg;base64," + __import__("base64").b64encode(b"\xff\xd8fake").decode()
+    out = client.post("/api/chat", json={"messages": [{"role": "user", "content": "check my work"}],
+                                         "image": img, "imageSize": [1000, 1300], "checkWork": True}).get_data(as_text=True)
+    assert "first_error" in seen["vision"]["messages"][0]["content"]
+    data = json.loads(out.split(app_module.PHOTO_MARK)[1])
+    assert data["check"] is True and data["firstError"] == 1 and len(data["steps"]) == 2
+    system = seen["tutor"]["messages"][0]["content"]
+    assert "CHECK THEIR WORK" in system and "Step 2" in system and "subtracted the bottom" in system
+    assert "error_note" not in data, "the private note never goes to the page"
 
 
-def test_no_emails_when_turned_off_or_not_approved(app_module, client, monkeypatch):
-    make_account(client, "Pending Pat", "3", "password1", is13=False, parent_email="x@example.com")
-    users = app_module._load_users()
-    users["pending pat"]["report_freq"] = "daily"
-    users["pending pat"]["report_freq_set_at"] = "2020-01-01T00:00:00+00:00"
-    app_module._save_users(users)
-    sent = []
-    monkeypatch.setattr(app_module, "send_email", lambda *a: sent.append(a) or True)
-    app_module.send_due_reports()
-    assert sent == []
-
-
-def test_13_plus_students_choose_their_own_progress_emails(app_module, client):
-    make_account(client, "Teen Tia", "9", "password1")
-    assert client.post("/api/my-report-settings", json={"freq": "monthly"}).get_json()["reportFreq"] == "monthly"
-    assert client.get("/api/me").get_json()["reportFreq"] == "monthly"
-    assert client.post("/api/my-report-settings", json={"freq": "yearly"}).status_code == 400
+def test_explain_simple_tells_the_tutor_to_simplify(app_module, client, monkeypatch):
+    seen = _fake_tutor(app_module, monkeypatch)
+    client.post("/api/chat", json={"messages": [{"role": "user", "content": "Explain that more simply"}],
+                                   "profile": {"simple": True}}).get_data()
+    assert "EXPLAIN SIMPLE" in seen["tutor"]["messages"][0]["content"]
+    client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}],
+                                   "profile": {"simple": "yes"}}).get_data()
+    assert "EXPLAIN SIMPLE" not in seen["tutor"]["messages"][0]["content"]
 
 
 def test_activity_is_counted_and_deleted_with_the_account(app_module, client, monkeypatch):
