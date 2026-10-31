@@ -16,6 +16,7 @@
     if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) {
       document.documentElement.dataset.theme = 'dark';
     }
+    if (localStorage.getItem('thinkstep_font') === 'dyslexic') document.documentElement.dataset.font = 'dyslexic';
   } catch (e) {}
 </script>
 <style>
@@ -421,13 +422,13 @@
   }
 
   /* MIC BUTTON */
-  #micBtn {
+  #micBtn, #talkBtn {
     padding: 0 16px;
     background: white;
     color: var(--primary-dark);
     border: 1px solid var(--border);
   }
-  #micBtn:hover { background: var(--primary-light); }
+  #micBtn:hover, #talkBtn:hover { background: var(--primary-light); }
   #micBtn.recording {
     background: #d64545;
     color: white;
@@ -1012,7 +1013,7 @@
     input#prompt { font-size: 17px; padding: 13px 14px; min-height: 46px; } /* 16px avoids iOS zoom */
     button { padding: 0 16px; min-height: 46px; }
     #send { min-width: 64px; }
-    #micBtn, #photoBtn { padding: 0; min-width: 46px; }
+    #micBtn, #photoBtn, #talkBtn { padding: 0; min-width: 46px; }
 
     /* Right sidebar drawer: bigger touch targets everywhere inside */
     .sidebar-right {
@@ -1046,7 +1047,7 @@
     --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.3);
     color-scheme: dark;
   }
-  :root[data-theme="dark"] :is(#feedbackLink, #exportBtn, .starter-chip, #micBtn, #photoBtn,
+  :root[data-theme="dark"] :is(#feedbackLink, #exportBtn, .starter-chip, #micBtn, #talkBtn:not(.on), #photoBtn,
       .timer-controls button.secondary, textarea#notes, .difficulty-row button, .account-buttons button.secondary,
       .account-modal, .account-modal input, .account-modal select, .streak-stat, .nav-toggle, .icon-btn,
       input#prompt:focus, .photo-wrap, #photoPreview .pp-remove, .quiz-chip.ghost, .voice-select) {
@@ -1142,6 +1143,96 @@
     z-index: 110; align-items: center; justify-content: center; padding: 16px;
   }
   #emailOverlay.open { display: flex; }
+
+  /* ===== READING FONT (dyslexia-friendly option) ===== */
+  @font-face { font-family: 'OpenDyslexic'; src: url('/static/fonts/opendyslexic-regular.woff2') format('woff2');
+               font-weight: 400; font-display: swap; }
+  @font-face { font-family: 'OpenDyslexic'; src: url('/static/fonts/opendyslexic-bold.woff2') format('woff2');
+               font-weight: 700; font-display: swap; }
+  :root[data-font="dyslexic"] body, :root[data-font="dyslexic"] button,
+  :root[data-font="dyslexic"] input, :root[data-font="dyslexic"] textarea, :root[data-font="dyslexic"] select {
+    font-family: 'OpenDyslexic', 'Lexend Variable', sans-serif;
+  }
+  :root[data-font="dyslexic"] .msg { line-height: 1.75; letter-spacing: .02em; word-spacing: .14em; font-size: 17px; }
+
+  /* ===== CHECK MY WORK ===== */
+  .pp-modes { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .pp-mode { padding: 5px 11px; font-size: 13.5px; border-radius: 999px; min-height: 0;
+             background: white; color: #1d5b36; border: 1px solid #bfe9cf; box-shadow: none; }
+  .pp-mode:hover { background: #e3f6ea; box-shadow: none; }
+  .pp-mode.on { background: #16a34a; color: white; border-color: #16a34a; }
+  :root[data-theme="dark"] .pp-mode:not(.on) { background: var(--card); color: #a9e5c0; border-color: #24513a; }
+  .step-ok {
+    position: absolute; width: 22px; height: 22px; border-radius: 50%; background: #16a34a; color: white;
+    font-size: 13px; font-weight: 800; display: grid; place-items: center; transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 2px white; pointer-events: none; animation: stepPop .35s var(--ease) both;
+  }
+  .step-bad {
+    position: absolute; border: 3px solid #f97316; border-radius: 8px; pointer-events: none;
+    box-shadow: 0 0 0 9999px rgba(15, 23, 42, .18), 0 0 14px rgba(249,115,22,.75);
+    animation: stepPop .45s var(--ease) both, badGlow 1.6s ease-in-out .5s 3;
+  }
+  .step-bad .hw-tag { background: #ea580c; }
+  .step-allgood { position: absolute; left: 8px; bottom: 8px; background: #16a34a; color: white; font-size: 13px;
+                  font-weight: 700; padding: 4px 10px; border-radius: 999px; pointer-events: none; }
+  @keyframes stepPop { from { transform: translate(-50%, -50%) scale(.3); opacity: 0; } }
+  .step-bad { animation-name: badIn, badGlow; }
+  @keyframes badIn { from { opacity: 0; transform: scale(1.15); } }
+  @keyframes badGlow { 50% { border-color: #fdba74; } }
+
+  /* ===== ANSWER TOOLS (read aloud + explain simple) ===== */
+  .simple-btn {
+    margin-left: 4px; padding: 3px 10px; font-size: 13px; border-radius: 999px; min-height: 0; vertical-align: middle;
+    background: transparent; color: var(--muted); border: 1px solid var(--border); box-shadow: none; opacity: .75;
+  }
+  .msg.ai:hover .simple-btn, .simple-btn:focus-visible { opacity: 1; }
+  .simple-btn:hover { background: var(--primary-light); color: var(--primary-dark); box-shadow: none; }
+  @media (hover: none) { .simple-btn { opacity: .9; } }
+
+  /* ===== PROFILE PICTURE ===== */
+  .avatar-btn { width: 40px; height: 40px; border-radius: 50%; padding: 0; font-size: 22px; line-height: 1;
+                background: var(--primary-light); border: 2px solid var(--border); overflow: hidden; box-shadow: none; }
+  .avatar-btn:hover { background: var(--primary-light); border-color: var(--primary); box-shadow: none; }
+  .avatar-btn img, .avatar-big img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .avatar-big { width: 84px; height: 84px; border-radius: 50%; margin: 0 auto 10px; display: grid; place-items: center;
+                font-size: 46px; background: var(--primary-light); overflow: hidden; border: 3px solid var(--border); }
+  .emoji-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 12px 0; }
+  .emoji-grid button { font-size: 26px; padding: 6px 0; border-radius: 12px; background: var(--card);
+                       border: 1px solid var(--border); box-shadow: none; position: relative; color: inherit; }
+  .emoji-grid button:hover { background: var(--primary-light); box-shadow: none; }
+  .emoji-grid button.on { border-color: var(--primary); background: var(--primary-light); }
+  .emoji-grid button.locked { filter: grayscale(1); opacity: .35; cursor: not-allowed; }
+  .emoji-tier { font-size: 12.5px; color: var(--muted); margin: 10px 0 -4px; }
+  #avatarOverlay { display: none; position: fixed; inset: 0; background: rgba(20, 30, 60, 0.45); z-index: 105;
+                   align-items: center; justify-content: center; padding: 16px; }
+  #avatarOverlay.open { display: flex; }
+  #avatarOverlay .account-modal { max-height: 90vh; overflow-y: auto; }
+
+  /* ===== TALK MODE ===== */
+  #talkBtn.on, #talkBtn.on:hover { background: #16a34a; color: white; border-color: #16a34a; }
+  #talkBanner { display: none; align-items: center; gap: 10px; margin-bottom: 8px; padding: 8px 12px; border-radius: 14px;
+                background: var(--primary-light); color: var(--primary-dark); font-size: 15px; }
+  #talkBanner.show { display: flex; }
+  #talkBanner .dot { width: 10px; height: 10px; border-radius: 50%; background: #16a34a; animation: talkPulse 1s infinite; }
+  #talkBanner.speaking .dot { background: var(--primary); }
+  #talkBanner.thinking .dot { background: #f59e0b; }
+  #talkBanner button { margin-left: auto; padding: 4px 12px; font-size: 13.5px; min-height: 0; }
+  @keyframes talkPulse { 50% { transform: scale(1.5); opacity: .5; } }
+
+  /* ===== SEARCH + STAR CHATS ===== */
+  #chatSearch { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 14.5px;
+                background: var(--card); color: var(--text); margin-bottom: 10px; }
+  #chatSearch:focus { outline: none; border-color: var(--primary); }
+  #chatList li .star { cursor: pointer; color: var(--muted); padding: 0 4px; font-size: 15px; flex-shrink: 0; opacity: .5; }
+  #chatList li:hover .star, #chatList li .star.on { opacity: 1; }
+  #chatList li .star.on { color: #f59e0b; }
+  #chatList .list-head { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+                         padding: 8px 6px 4px; background: none; cursor: default; }
+  #chatList .list-head:hover { background: none; }
+  #chatList li .snippet { display: block; font-size: 12.5px; color: var(--muted); font-weight: 400;
+                          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #chatList li mark { background: #fde68a; color: inherit; border-radius: 3px; padding: 0 1px; }
+  #chatList .no-results { font-size: 13.5px; color: var(--muted); padding: 8px 6px; cursor: default; }
 </style>
 </head>
 <body>
@@ -1156,6 +1247,7 @@
       </div>
     </div>
     <div class="model-picker">
+      <button type="button" id="avatarBtn" class="avatar-btn" title="Your profile picture" aria-label="Your profile picture">😀</button>
       <button type="button" id="themeToggle" class="icon-btn" title="Night mode" aria-label="Night mode">🌙</button>
       <button type="button" id="toolsToggle" class="nav-toggle" title="Tools">🛠</button>
     </div>
@@ -1173,6 +1265,7 @@
   <div class="sidebar-left">
     <button id="newChatBtn">+ New Chat</button>
     <div class="section-title">Your Chats</div>
+    <input id="chatSearch" type="search" placeholder="🔍 Search your chats" aria-label="Search your chats" maxlength="80" />
     <ul id="chatList"></ul>
   </div>
 
@@ -1193,14 +1286,21 @@
       <div id="photoPreview">
         <img id="photoPreviewImg" alt="Your homework photo">
         <div class="pp-text">Photo ready! Ask about it, or just press <b>Ask</b>.
-          <small>Only snap your homework — no faces or names, please.</small></div>
+          <small>Only snap your homework — no faces or names, please.</small>
+          <div class="pp-modes">
+            <button type="button" class="pp-mode on" data-mode="help">🙋 Help me with it</button>
+            <button type="button" class="pp-mode" data-mode="check">✅ Check my work</button>
+          </div></div>
         <button type="button" class="pp-remove" id="photoRemove" title="Remove photo">✕</button>
       </div>
+      <div id="talkBanner" role="status"><span class="dot"></span><span id="talkText">Talk mode: I'm listening…</span>
+        <button type="button" id="talkStop" class="secondary">Stop</button></div>
       <form id="form">
         <input id="prompt" type="text" placeholder="What are you working on?" autocomplete="off" maxlength="4000" enterkeyhint="send" />
         <input id="photoInput" type="file" accept="image/*" hidden />
         <button type="button" id="photoBtn" title="Add a photo of your homework">📷</button>
         <button type="button" id="micBtn" title="Speak your question">🎤</button>
+        <button type="button" id="talkBtn" title="Talk mode: talk with ThinkStep, hands-free">🗣</button>
         <button type="submit" id="send">Ask</button>
       </form>
     </footer>
@@ -1245,6 +1345,15 @@
       <label class="switch-row"><input type="checkbox" id="autoRead"> Read answers out loud automatically</label>
       <button type="button" class="small-btn" id="voiceSample">▶ Hear this voice</button>
       <div class="voice-note" id="voiceNote"></div>
+    </div>
+
+    <div class="tool-card">
+      <h3>🔤 Reading</h3>
+      <select id="fontSelect" class="voice-select" aria-label="Reading font">
+        <option value="">Normal font</option>
+        <option value="dyslexic">Easy-read font (dyslexia-friendly)</option>
+      </select>
+      <div class="voice-note">The easy-read font has heavier bottoms on letters, so b, d, p and q are easier to tell apart.</div>
     </div>
 
 
@@ -1356,6 +1465,19 @@
   </div>
 </div>
 
+<div id="avatarOverlay">
+  <div class="account-modal">
+    <button type="button" class="close-btn" id="avatarClose">✕</button>
+    <h2>Your profile picture</h2>
+    <div class="avatar-big" id="avatarBig">😀</div>
+    <div class="sub" id="avatarSub">Pick an emoji! Answer more questions to unlock more.</div>
+    <div id="emojiTiers"></div>
+    <input id="avatarFile" type="file" accept="image/*" hidden />
+    <button type="button" class="submit-btn" id="avatarUpload">📷 Use a picture instead</button>
+    <div class="field-hint" style="text-align:center;margin-top:8px">Your picture stays on this device. It's never uploaded.</div>
+  </div>
+</div>
+
 <div id="toast" role="status" aria-live="polite"></div>
 
 <div id="photoViewer">
@@ -1451,6 +1573,11 @@ const BADGE_DEFS = [
   { id: 'perfect', icon: '💯', name: 'Perfect Quiz',    how: 'Get every quiz question right' },
   { id: 'listen',  icon: '🎧', name: 'Good Listener',   how: 'Have an answer read out loud' },
   { id: 'focus',   icon: '⏱️', name: 'Focus Finisher',  how: 'Finish a focus timer' },
+  { id: 'checker', icon: '🔎', name: 'Work Checker',    how: 'Have your work checked from a photo' },
+  { id: 'simple',  icon: '🧸', name: 'Keep It Simple',  how: 'Use Explain simple' },
+  { id: 'talk',    icon: '🗣️', name: 'Chatterbox',      how: 'Try talk mode' },
+  { id: 'star',    icon: '⭐', name: 'Collector',       how: 'Star a chat' },
+  { id: 'reader',  icon: '🔤', name: 'Easy Reader',     how: 'Try the easy-read font' },
 ];
 function myBadges() {
   try { return JSON.parse(pGet('badges') || '[]'); } catch { return []; }
@@ -1483,6 +1610,7 @@ function earnBadge(id) {
   }
 }
 function checkProgressBadges() {
+  checkEmojiUnlocks();
   const n = parseInt(pGet('problems') || '0', 10);
   const streak = parseInt(pGet('streak') || '0', 10);
   if (n >= 1) earnBadge('first');
@@ -1819,6 +1947,17 @@ function attachSayButton(div, text) {
   b.setAttribute('aria-label', 'Read this out loud');
   b.addEventListener('click', () => speakMessage(text, b));
   div.appendChild(b);
+  const sb = document.createElement('button');
+  sb.type = 'button';
+  sb.className = 'simple-btn';
+  sb.textContent = '🧸 Explain simple';
+  sb.title = 'Explain this again in the simplest way';
+  sb.addEventListener('click', () => {
+    if (busy) return;
+    const short = stripTags(text).replace(/\s+/g, ' ').slice(0, 220);
+    sendMessage(`Can you explain this in a simpler way? "${short}${text.length > 220 ? '…' : ''}"`, { simple: true });
+  });
+  div.appendChild(sb);
 }
 
 /* =====================================================================
@@ -1827,7 +1966,7 @@ function attachSayButton(div, text) {
    ===================================================================== */
 function userFromServer(r) {
   return { name: r.name, grade: r.grade || '', under13: !!r.under13,
-           reportFreq: r.reportFreq || 'never', needsEmail: !!r.needsEmail };
+           hasProgressPage: !!r.hasProgressPage, needsEmail: !!r.needsEmail };
 }
 const emailOverlay = document.getElementById('emailOverlay');
 const emailForm = document.getElementById('emailForm');
@@ -1865,28 +2004,190 @@ document.getElementById('emailLogout').addEventListener('click', async () => {
 
 function reportSettingHtml() {
   if (!currentUser) return '';
-  if (currentUser.under13) {
-    return '<div class="report-row">📬 Your parent chooses how often they get progress emails.</div>';
+  if (!currentUser.hasProgressPage) {
+    return '<div class="report-row">📊 Your parent can see your progress on their dashboard.</div>';
   }
-  const opts = [['never', 'Off'], ['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month']]
-    .map(([v, l]) => `<option value="${v}"${currentUser.reportFreq === v ? ' selected' : ''}>${l}</option>`).join('');
-  return `<div class="report-row">📬 Progress emails<select id="reportFreq" class="voice-select">${opts}</select></div>`;
+  return '<div class="report-row"><button type="button" class="link-btn" id="myProgressBtn">📊 See my progress</button></div>';
 }
 function wireReportSetting() {
-  const sel = document.getElementById('reportFreq');
-  if (!sel) return;
-  sel.addEventListener('change', async () => {
-    try {
-      const res = await fetch('/api/my-report-settings', { method: 'POST',
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ freq: sel.value }) });
-      if (!res.ok) throw new Error();
-      currentUser.reportFreq = sel.value;
-      showToast(sel.value === 'never' ? '📬 Progress emails off' : '📬 Progress emails saved');
-    } catch {
-      sel.value = currentUser.reportFreq;
-      showToast("Couldn't save that — try again in a moment.");
-    }
+  const b = document.getElementById('myProgressBtn');
+  if (b) b.addEventListener('click', openMyProgress);
+}
+
+/* =====================================================================
+   Profile picture: an emoji (more unlock as you answer more questions)
+   or your own picture, which stays on this device only.
+   ===================================================================== */
+const EMOJI_TIERS = [
+  { at: 0,   list: ['😀', '😎', '🐱', '🐶', '🦊', '🐼'] },
+  { at: 5,   list: ['🐸', '🐵', '🐧', '🐢', '🐝', '🦋'] },
+  { at: 15,  list: ['🦁', '🐯', '🐨', '🐙', '🦉', '🐬'] },
+  { at: 30,  list: ['🦄', '🐉', '🚀', '⭐', '🌈', '⚡'] },
+  { at: 50,  list: ['🤖', '👾', '🧠', '🎨', '🎸', '⚽'] },
+  { at: 100, list: ['👑', '💎', '🏆', '🎓', '🦖', '🔥'] },
+];
+const avatarBtn = document.getElementById('avatarBtn');
+const avatarOverlay = document.getElementById('avatarOverlay');
+function questionsDone() { return parseInt(pGet('problems') || '0', 10); }
+function myAvatar() {
+  try { return JSON.parse(pGet('avatar') || 'null') || { type: 'emoji', value: '😀' }; } catch { return { type: 'emoji', value: '😀' }; }
+}
+function avatarHtml(a) {
+  return a.type === 'img' && /^data:image\/(jpeg|png|webp);base64,/.test(a.value)
+    ? `<img src="${a.value}" alt="">` : escapeHtml(a.value || '😀');
+}
+function renderAvatar() {
+  const a = myAvatar();
+  avatarBtn.innerHTML = avatarHtml(a);
+  document.getElementById('avatarBig').innerHTML = avatarHtml(a);
+}
+function renderEmojiPicker() {
+  const done = questionsDone(), a = myAvatar();
+  const box = document.getElementById('emojiTiers');
+  box.innerHTML = '';
+  EMOJI_TIERS.forEach(t => {
+    const open = done >= t.at;
+    const label = document.createElement('div');
+    label.className = 'emoji-tier';
+    label.textContent = t.at === 0 ? 'Starter emojis' : (open ? `Unlocked at ${t.at} questions` : `🔒 Unlocks at ${t.at} questions (you have ${done})`);
+    box.appendChild(label);
+    const grid = document.createElement('div');
+    grid.className = 'emoji-grid';
+    t.list.forEach(e => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = e;
+      b.className = (open ? '' : 'locked') + (a.type === 'emoji' && a.value === e ? ' on' : '');
+      b.title = open ? 'Pick ' + e : `Answer ${t.at - done} more question${t.at - done === 1 ? '' : 's'} to unlock`;
+      b.addEventListener('click', () => {
+        if (!open) { showToast(`🔒 Answer ${t.at - done} more question${t.at - done === 1 ? '' : 's'} to unlock this one!`); return; }
+        pSet('avatar', JSON.stringify({ type: 'emoji', value: e }));
+        renderAvatar(); renderEmojiPicker();
+      });
+      grid.appendChild(b);
+    });
+    box.appendChild(grid);
   });
+}
+function openAvatarPicker() { renderEmojiPicker(); renderAvatar(); avatarOverlay.classList.add('open'); }
+avatarBtn.addEventListener('click', openAvatarPicker);
+document.getElementById('avatarClose').addEventListener('click', () => avatarOverlay.classList.remove('open'));
+avatarOverlay.addEventListener('click', (e) => { if (e.target === avatarOverlay) avatarOverlay.classList.remove('open'); });
+document.getElementById('avatarUpload').addEventListener('click', () => document.getElementById('avatarFile').click());
+document.getElementById('avatarFile').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const src = await loadImageSource(file);
+    const size = 160, c = document.createElement('canvas');
+    c.width = c.height = size;
+    const sw = src.width, sh = src.height, side = Math.min(sw, sh);
+    c.getContext('2d').drawImage(src, (sw - side) / 2, (sh - side) / 2, side, side, 0, 0, size, size);
+    pSet('avatar', JSON.stringify({ type: 'img', value: c.toDataURL('image/jpeg', 0.85) }));
+    renderAvatar(); renderEmojiPicker();
+    showToast('🖼️ Profile picture saved on this device');
+  } catch { showToast("Couldn't open that picture — try another one."); }
+});
+let lastTierSeen = null;
+function checkEmojiUnlocks() {
+  const done = questionsDone();
+  const tier = EMOJI_TIERS.filter(t => done >= t.at).length;
+  if (lastTierSeen !== null && tier > lastTierSeen) showToast('🎉 New profile emojis unlocked! Tap your picture to see.');
+  lastTierSeen = tier;
+}
+
+/* =====================================================================
+   Reading font: Lexend, or the dyslexia-friendly OpenDyslexic.
+   ===================================================================== */
+const fontSelect = document.getElementById('fontSelect');
+fontSelect.value = lsGet('thinkstep_font', '') === 'dyslexic' ? 'dyslexic' : '';
+fontSelect.addEventListener('change', () => {
+  if (fontSelect.value === 'dyslexic') { document.documentElement.dataset.font = 'dyslexic'; earnBadge('reader'); }
+  else delete document.documentElement.dataset.font;
+  lsSet('thinkstep_font', fontSelect.value);
+});
+
+/* =====================================================================
+   Talk mode: listen → ask → read the answer out loud → listen again.
+   ===================================================================== */
+const talkBtn = document.getElementById('talkBtn');
+const talkBanner = document.getElementById('talkBanner');
+const talkText = document.getElementById('talkText');
+let talkModeOn = false, talkRec = null, talkMisses = 0;
+function talkStatus(kind, text) {
+  talkBanner.classList.toggle('show', talkModeOn);
+  talkBanner.classList.toggle('thinking', kind === 'thinking');
+  talkBanner.classList.toggle('speaking', kind === 'speaking');
+  talkText.textContent = text;
+}
+function stopTalkMode(msg) {
+  talkModeOn = false;
+  talkBtn.classList.remove('on');
+  try { talkRec && talkRec.abort(); } catch {}
+  talkBanner.classList.remove('show');
+  if (msg) showToast(msg);
+}
+function talkListen() {
+  if (!talkModeOn) return;
+  talkStatus('listening', "🗣 Talk mode: I'm listening… just say your question.");
+  try { talkRec.start(); } catch {}
+}
+async function talkHeard(text) {
+  if (!talkModeOn || !text.trim()) return talkListen();
+  talkStatus('thinking', `💭 "${text.trim().slice(0, 60)}" … thinking`);
+  lastSpeech = null;
+  await sendMessage(text.trim());
+  if (!talkModeOn) return;
+  talkStatus('speaking', '🔊 Answering… (tap Stop anytime)');
+  try { if (lastSpeech) await lastSpeech; } catch {}
+  setTimeout(talkListen, 350);
+}
+function startTalkMode() {
+  if (!SpeechRecognitionAPI || !isSecureContext) {
+    showToast('Talk mode needs Chrome or Edge on a computer, or Chrome on Android.');
+    return;
+  }
+  if (!currentUser && guestAgeStatus !== 'ok') { openAgeModal(); return; }
+  if (!talkRec) {
+    talkRec = new SpeechRecognitionAPI();
+    talkRec.lang = 'en-US';
+    talkRec.continuous = false;
+    talkRec.interimResults = false;
+    talkRec.addEventListener('result', (e) => {
+      talkMisses = 0;
+      const said = Array.from(e.results).map(r => r[0].transcript).join(' ');
+      talkHeard(said);
+    });
+    talkRec.addEventListener('error', (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') stopTalkMode('Allow the microphone for this site to use talk mode.');
+      else if (e.error === 'no-speech') { if (++talkMisses >= 3) stopTalkMode("Talk mode stopped — I didn't hear anything."); }
+    });
+    talkRec.addEventListener('end', () => {
+      // nothing heard this round (no result) → listen again, unless busy answering
+      if (talkModeOn && !busy && talkBanner.classList.contains('show') &&
+          !talkBanner.classList.contains('thinking') && !talkBanner.classList.contains('speaking')) setTimeout(talkListen, 300);
+    });
+  }
+  talkModeOn = true;
+  talkMisses = 0;
+  talkBtn.classList.add('on');
+  earnBadge('talk');
+  talkListen();
+}
+talkBtn.addEventListener('click', () => talkModeOn ? stopTalkMode() : startTalkMode());
+document.getElementById('talkStop').addEventListener('click', () => { stopSpeaking(); stopTalkMode(); });
+
+/* =====================================================================
+   Progress page link in the Account box.
+   ===================================================================== */
+async function openMyProgress() {
+  try {
+    const r = await fetch('/api/my-progress', { cache: 'no-store' });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    window.open(d.url, '_blank', 'noopener');
+  } catch (e) { showToast(e.message || "Couldn't open your progress page right now."); }
 }
 const chatListEl = document.getElementById('chatList');
 const newChatBtn = document.getElementById('newChatBtn');
@@ -2403,12 +2704,48 @@ function getActive() {
   return chats.find(c => c.id === activeId);
 }
 
+function chatMatches(c, q) {
+  if (!q) return { ok: true };
+  if ((c.title || '').toLowerCase().includes(q)) return { ok: true };
+  for (const m of c.messages || []) {
+    const t = (m.content || '');
+    const i = t.toLowerCase().indexOf(q);
+    if (i !== -1) return { ok: true, snippet: (i > 20 ? '…' : '') + t.slice(Math.max(0, i - 20), i + q.length + 40) };
+  }
+  return { ok: false };
+}
+function highlight(text, q) {
+  const safe = escapeHtml(text);
+  if (!q) return safe;
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  return safe.replace(re, m => `<mark>${m}</mark>`);
+}
 function renderChatList() {
   chatListEl.innerHTML = '';
-  chats.slice().reverse().forEach(c => {
+  const q = (document.getElementById('chatSearch').value || '').trim().toLowerCase();
+  const all = chats.slice().reverse().map(c => ({ c, m: chatMatches(c, q) })).filter(x => x.m.ok);
+  const starred = all.filter(x => x.c.starred), rest = all.filter(x => !x.c.starred);
+  const head = (label) => { const li = document.createElement('li'); li.className = 'list-head'; li.textContent = label; chatListEl.appendChild(li); };
+  if (!all.length) {
+    const li = document.createElement('li');
+    li.className = 'no-results';
+    li.textContent = 'No chats match that search.';
+    chatListEl.appendChild(li);
+    return;
+  }
+  const addRow = ({ c, m }) => {
     const li = document.createElement('li');
     li.className = c.id === activeId ? 'active' : '';
-    li.innerHTML = `<span class="title">${escapeHtml(c.title)}</span><span class="del" title="Delete">✕</span>`;
+    li.innerHTML = `<span class="star${c.starred ? ' on' : ''}" title="${c.starred ? 'Unstar' : 'Star this chat to keep it at the top'}">${c.starred ? '★' : '☆'}</span>` +
+      `<span class="title">${highlight(c.title, q)}${m.snippet ? `<span class="snippet">${highlight(m.snippet, q)}</span>` : ''}</span>` +
+      `<span class="del" title="Delete">✕</span>`;
+    li.querySelector('.star').addEventListener('click', (e) => {
+      e.stopPropagation();
+      c.starred = !c.starred;
+      saveChats(chats);
+      renderChatList();
+      if (c.starred) earnBadge('star');
+    });
     li.querySelector('.title').addEventListener('click', () => {
       activeId = c.id;
       pSet('active', activeId);
@@ -2431,8 +2768,11 @@ function renderChatList() {
       renderMessages();
     });
     chatListEl.appendChild(li);
-  });
+  };
+  if (starred.length) { head('⭐ Starred'); starred.forEach(addRow); if (rest.length) head(q ? 'Other matches' : 'Recent'); }
+  rest.forEach(addRow);
 }
+document.getElementById('chatSearch').addEventListener('input', () => renderChatList());
 
 function escapeHtml(s) {
   const d = document.createElement('div');
@@ -2685,7 +3025,9 @@ function renderProgress() {
   updateStreak();
   document.getElementById('problemsNum').textContent = pGet('problems') || '0';
   renderBadges();
+  lastTierSeen = null;
   checkProgressBadges();
+  renderAvatar();
 }
 
 /* ---------- Export summary ---------- */
@@ -2900,8 +3242,21 @@ async function setPendingPhoto(file) {
   }
 }
 
+// "Help me with it" or "Check my work" for the photo being sent
+let photoMode = 'help';
+function setPhotoMode(mode) {
+  photoMode = mode === 'check' ? 'check' : 'help';
+  document.querySelectorAll('.pp-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === photoMode));
+  promptEl.placeholder = photoMode === 'check'
+    ? 'Which problem should I check? (or just press Ask)'
+    : 'What do you need help with? (or just press Ask)';
+}
+document.querySelectorAll('.pp-mode').forEach(b => b.addEventListener('click', () => setPhotoMode(b.dataset.mode)));
+
 function clearPendingPhoto() {
   pendingPhoto = null;
+  photoMode = 'help';
+  document.querySelectorAll('.pp-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === 'help'));
   photoPreview.classList.remove('show');
   photoPreviewImg.removeAttribute('src');
   photoBtn.classList.remove('has-photo');
@@ -3055,8 +3410,52 @@ function boxToShow(photo) {
   return { label: photo.problems.length > 1 ? 'Your homework' : photo.problems[0].label, box: b, all: true };
 }
 
+function drawStepCheck(wrap, msg, animate) {
+  const ph = msg.photo;
+  const steps = (ph && ph.check && Array.isArray(ph.steps)) ? ph.steps : [];
+  if (!steps.length) return false;
+  const fe = Number.isInteger(ph.firstError) ? ph.firstError : -1;
+  steps.forEach((st, i) => {
+    if (!Array.isArray(st.box) || st.box.length !== 4) return;
+    const [x1, y1, x2, y2] = st.box;
+    if (fe >= 0 && i > fe) return;          // steps after the mistake: no mark yet
+    if (i === fe) {
+      const PAD = 8;
+      const box = document.createElement('div');
+      box.className = 'step-bad hw-box';
+      if (!animate) box.style.animation = 'none';
+      Object.assign(box.style, {
+        left: pct(Math.max(0, x1 - PAD)), top: pct(Math.max(0, y1 - PAD)),
+        width: pct(Math.min(1000, x2 + PAD) - Math.max(0, x1 - PAD)),
+        height: pct(Math.min(1000, y2 + PAD) - Math.max(0, y1 - PAD)) });
+      const tag = document.createElement('span');
+      tag.className = 'hw-tag' + (y1 < 70 ? ' inside' : '');
+      tag.textContent = '🔎 Check this step';
+      box.appendChild(tag);
+      wrap.appendChild(box);
+    } else {
+      const ok = document.createElement('span');
+      ok.className = 'step-ok hw-box';
+      ok.textContent = '✓';
+      ok.style.left = pct(Math.min(985, x2 + 18));
+      ok.style.top = pct((y1 + y2) / 2);
+      if (animate) ok.style.animationDelay = (i * 0.15) + 's';
+      else ok.style.animation = 'none';
+      wrap.appendChild(ok);
+    }
+  });
+  if (fe < 0) {
+    const good = document.createElement('span');
+    good.className = 'step-allgood hw-box';
+    good.textContent = '✓ All your steps look right!';
+    wrap.appendChild(good);
+  }
+  return true;
+}
+
 function drawHomeworkBox(wrap, msg, animate = true) {
   wrap.querySelectorAll('.hw-box').forEach(b => b.remove());
+  if (drawStepCheck(wrap, msg, animate)) return;
   const pick = boxToShow(msg.photo);
   if (!pick) return;
   const PAD = 10;  // a little breathing room around the problem
@@ -3129,11 +3528,13 @@ photoViewer.addEventListener('click', (e) => { if (e.target === photoViewer) clo
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePhotoViewer(); });
 
 let busy = false;
-async function sendMessage(text) {
+let lastSpeech = null;   // the read-aloud of the newest answer (talk mode waits for it)
+async function sendMessage(text, opts = {}) {
   if (busy) return;
   busy = true;
   const active = getActive();
   const photo = pendingPhoto;
+  const checkWork = !!photo && photoMode === 'check';
   clearPendingPhoto();
   const userMsg = { role: 'user', content: text };
   if (photo) { userMsg.image = photo.small; userMsg.imageSize = [photo.w, photo.h]; }
@@ -3179,7 +3580,9 @@ async function sendMessage(text) {
           ...(m.photo && m.photo.notes ? { photoNotes: m.photo.notes } : {}),
         })),
         ...(photo ? { image: photo.big, imageSize: [photo.bw, photo.bh] } : {}),
-        profile: { difficulty: currentDifficulty, ...(active.quiz ? { quiz: active.quiz } : {}) },
+        ...(checkWork ? { checkWork: true } : {}),
+        profile: { difficulty: currentDifficulty, ...(active.quiz ? { quiz: active.quiz } : {}),
+                   ...(opts.simple ? { simple: true } : {}) },
       })
     });
 
@@ -3257,7 +3660,9 @@ async function sendMessage(text) {
       bumpProblemsCount();
       if (photo) earnBadge('photo');
       attachSayButton(aiDiv, answer);
-      if (autoReadOn()) speakMessage(answer, aiDiv.querySelector('.say-btn'));
+      if (autoReadOn() || talkModeOn) lastSpeech = speakMessage(answer, aiDiv.querySelector('.say-btn'));
+      if (checkWork) earnBadge('checker');
+      if (opts.simple) earnBadge('simple');
       if (!currentUser) refreshGuestStatus(); // keep the "X free questions left" count live
     } else {
       // Nothing was really answered: take the question back out of the saved
@@ -3287,7 +3692,7 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const typed = promptEl.value.trim();
   if ((!typed && !pendingPhoto) || busy) return;
-  const text = typed || 'Can you help me with this?';
+  const text = typed || (pendingPhoto && photoMode === 'check' ? 'Can you check my work?' : 'Can you help me with this?');
   if (!currentUser && guestAgeStatus === null) await refreshGuestStatus();  // answer may already be saved
   if (!currentUser && guestAgeStatus !== 'ok') {
     openAgeModal(text);  // guests answer the age question once, first
