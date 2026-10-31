@@ -1789,6 +1789,25 @@ Look at the photo and reply with JSON only, exactly this shape:
 If "homework" is false, use "problems": [] and "focus": -1."""
 
 
+# "Check my work" mode: the same photo reader, plus every line of the
+# student's own work with its own box, and which line is the first mistake.
+STEP_CHECK_ADDON = """
+
+THE STUDENT WANTS THEIR WORK CHECKED. Add these fields to the same JSON:
+"steps": [{"text": "...", "box": [x1, y1, x2, y2]}], "first_error": 0, "error_note": "..."
+- "steps": each line of work the STUDENT wrote for the problem they're asking
+  about (or the only problem), in order, at most 12. "text" is exactly what
+  that line says. "box" is a tight box around that one line, same 0-1000
+  scale as above. Do not include the printed question itself.
+- "first_error": the index (0 = first) of the FIRST step that is wrong
+  (wrong math, a copying mistake, a wrong sign, a dropped number). If every
+  step is right, -1. Check each step carefully, one at a time.
+- "error_note": a short private note for the tutor about what is wrong in
+  that step and why (it will NOT be shown to the student). Empty if none.
+If the student hasn't written any work yet, use "steps": [] and -1."""
+STEP_CHECK_MAX = 12
+
+
 def valid_photo_data_url(s):
     return (isinstance(s, str) and len(s) <= PHOTO_MAX_DATA_URL_CHARS
             and bool(_PHOTO_DATA_URL_RE.match(s)))
@@ -1863,13 +1882,32 @@ def _clean_photo_reading(raw, image_size=None):
         focus = 0 if len(problems) == 1 else -1
     if not homework:
         problems, focus = [], -1
+    steps = []
+    for st in (raw.get("steps") or [])[:STEP_CHECK_MAX] if isinstance(raw.get("steps"), list) else []:
+        if not isinstance(st, dict):
+            continue
+        box = _clean_box(st.get("box"), image_size)
+        text = re.sub(r"\s+", " ", str(st.get("text") or "")).strip()[:120]
+        if box and text:
+            steps.append({"text": text, "box": box})
+    try:
+        first_error = int(raw.get("first_error", -1))
+    except (TypeError, ValueError):
+        first_error = -1
+    if not (0 <= first_error < len(steps)):
+        first_error = -1
+    error_note = re.sub(r"\s+", " ", str(raw.get("error_note") or "")).strip()[:300] if first_error >= 0 else ""
+    if not homework:
+        steps, first_error, error_note = [], -1, ""
     return {"appropriate": appropriate, "homework": homework and appropriate,
-            "notes": notes if appropriate else "", "problems": problems, "focus": focus}
+            "notes": notes if appropriate else "", "problems": problems, "focus": focus,
+            "steps": steps, "first_error": first_error, "error_note": error_note}
 
 
-def read_homework_photo(data_url, student_text, api_key, image_size=None):
+def read_homework_photo(data_url, student_text, api_key, image_size=None, check_work=False):
     """Reads a homework photo. Returns the cleaned reading, or None if no
-    vision model could read it."""
+    vision model could read it. With check_work, it also lists the
+    student's own steps and finds the first wrong one."""
     if not api_key or not valid_photo_data_url(data_url):
         return None
     headers = {"Authorization": f"Bearer {api_key}"}
@@ -1891,7 +1929,7 @@ def read_homework_photo(data_url, student_text, api_key, image_size=None):
                     body = {
                         "model": vision_model,
                         "messages": [
-                            {"role": "system", "content": PHOTO_READER_PROMPT},
+                            {"role": "system", "content": PHOTO_READER_PROMPT + (STEP_CHECK_ADDON if check_work else "")},
                             {"role": "user", "content": user_content},
                         ],
                         "stream": False,
@@ -1927,8 +1965,31 @@ def read_homework_photo(data_url, student_text, api_key, image_size=None):
     return None
 
 
-def photo_notes_block(reading):
+def photo_notes_block(reading, check_work=False):
     """The private note the tutor reads about the photo."""
+    if check_work:
+        steps = reading.get("steps") or []
+        fe = reading.get("first_error", -1)
+        if not steps:
+            check = ("The student asked you to check their work, but no written work was found. "
+                     "Ask them to write their steps (or type them) and send it again.")
+        else:
+            listed = "\n".join(f"  Step {i + 1}: {st['text']}" for i, st in enumerate(steps))
+            if fe >= 0:
+                check = (f"The student asked you to CHECK THEIR WORK. Their steps:\n{listed}\n"
+                         f"The first mistake is in Step {fe + 1}. Private note (do not read it out): "
+                         f"{reading.get('error_note') or '(none)'}\n"
+                         f"The page shows green ticks on the steps before it and an orange box "
+                         f"around Step {fe + 1}. In ONE short reply: say what they did well, then "
+                         f"point them to the step in the orange box and ask one question that helps "
+                         f"them spot the mistake themselves. Do NOT fix it for them or give the answer.")
+            else:
+                check = (f"The student asked you to CHECK THEIR WORK. Their steps:\n{listed}\n"
+                         f"Every step looks right. Tell them so warmly (the page shows a green tick on "
+                         f"each step), then ask them to explain one step in their own words.")
+        return ("\n=== PHOTO NOTES (the student just shared a photo of their own work) ===\n"
+                + (reading["notes"] or "(the writing was hard to read)") + "\n" + check
+                + "\n=== END PHOTO NOTES ===\n")
     focus = reading["focus"]
     asked = (f'They are asking about {reading["problems"][focus]["label"]}. The page shows a '
              f'green box around it on their photo, so you can call it "the problem in the green box".'
@@ -2415,8 +2476,7 @@ def signup():
         f"policy here: {request.url_root}privacy\n\n"
         f"If you're okay with {name} using ThinkStep, click this link to approve "
         f"their account:\n{consent_link}\n\n"
-        f"After approving, you can choose how often you'd like a short progress "
-        f"email (every day, week, month, or never).\n\n"
+        f"After approving, you'll get a private link to {name}'s progress dashboard.\n\n"
         f"If you did not expect this email or don't want {name} to have an "
         f"account, you can simply ignore it — nothing further will happen and "
         f"their account will stay inactive.\n"
@@ -2515,10 +2575,29 @@ def consent_activate(token):
 
     print(f"[ThinkStep] Parental consent granted for account: {user['name']}")
     safe_name = html.escape(user["name"])
-    return _report_page("Account approved", _report_choice_form(
-        report_token, user["name"], None,
-        f'<p class="done">🎉</p><h1>Thanks, account approved!</h1>'
-        f'<p>{safe_name} can now log in and start using ThinkStep.</p>'))
+    link = progress_url(report_token)
+    # one email with the dashboard link, so the parent can always find it
+    send_email(user.get("parent_email", ""), f"{user['name']}'s ThinkStep progress page",
+               f"Hi,\n\nThanks for approving {user['name']}'s ThinkStep account!\n\n"
+               f"You can see how {user['name']} is doing anytime on this private page "
+               f"(questions worked on, days practiced, quiz scores and badges — never what "
+               f"they asked):\n{link}\n\nBookmark it, and keep the link private.\n")
+    return _consent_result_page_html(
+        "Account approved",
+        f'<p style="font-size:30px;margin:0 0 6px">🎉</p><h1>Thanks, account approved!</h1>'
+        f'<p>{safe_name} can now log in and start using ThinkStep.</p>'
+        f'<p style="margin-top:18px">You can see {safe_name}\'s progress anytime on your private '
+        f'parent dashboard. We also emailed you the link.</p>'
+        f'<p style="margin-top:18px"><a class="approve-btn" style="text-decoration:none;display:inline-block" '
+        f'href="/progress/{html.escape(report_token)}">📊 Open the parent dashboard</a></p>')
+
+
+def _consent_result_page_html(title, inner_html):
+    return Response(f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>{html.escape(title)} — ThinkStep</title>
+{_CONSENT_PAGE_STYLE}
+<body><div class="card">{inner_html}</div></body></html>""", mimetype="text/html")
 
 
 _CONSENT_PAGE_STYLE = """<style>
@@ -2859,11 +2938,6 @@ def guest_age():
 # ============================================================
 ACTIVITY_FILE = "activity.json"
 ACTIVITY_KEEP_DAYS = 40
-REPORT_FREQS = {"daily": 1, "weekly": 7, "monthly": 30}
-REPORT_FREQ_LABELS = {"daily": "every day", "weekly": "every week",
-                      "monthly": "every month", "never": "no emails"}
-REPORT_CHECK_SECONDS = 10 * 60
-REPORTS_PER_RUN = 40   # the Gmail sender allows ~100 emails a day in total
 APP_URL = (os.environ.get("APP_URL") or "https://thinkstep-github-io-1.onrender.com/").rstrip("/") + "/"
 _activity_lock = threading.RLock()
 
@@ -2879,6 +2953,11 @@ BADGES = {
     "perfect": "💯 Perfect Quiz",
     "listen": "🎧 Good Listener",
     "focus": "⏱️ Focus Finisher",
+    "checker": "🔎 Work Checker",
+    "simple": "🧸 Keep It Simple",
+    "talk": "🗣️ Chatterbox",
+    "star": "⭐ Collector",
+    "reader": "🔤 Easy Reader",
 }
 
 
@@ -2886,7 +2965,7 @@ def _today_str():
     return datetime.now(timezone.utc).date().isoformat()
 
 
-def record_activity(key, questions=0, photos=0, quiz=None, badge=None):
+def record_activity(key, questions=0, photos=0, quiz=None, badge=None, checks=0):
     """Adds to today's tally for one account. Never raises — a hiccup here
     must never break the chat."""
     if not key:
@@ -2900,6 +2979,8 @@ def record_activity(key, questions=0, photos=0, quiz=None, badge=None):
                 day["q"] = day.get("q", 0) + questions
             if photos:
                 day["photos"] = day.get("photos", 0) + photos
+            if checks:
+                day["checks"] = day.get("checks", 0) + checks
             if quiz:
                 quizzes = day.setdefault("quizzes", [])
                 if len(quizzes) < 30:
@@ -2948,107 +3029,15 @@ def is_under_13_account(user):
     return bool(user.get("parent_email")) and user.get("consent_status") != "not_required"
 
 
-def report_email_for(user):
-    """Who gets this account's progress emails: the parent for under-13s,
-    the student's own email for everyone else."""
-    if is_under_13_account(user):
-        return user.get("parent_email", "").strip() if user.get("consent_status") == "granted" else ""
-    return (user.get("recovery_email") or "").strip()
-
-
 def ensure_report_token(user):
+    """The secret part of an account's progress-dashboard link."""
     if not user.get("report_token"):
         user["report_token"] = secrets.token_urlsafe(24)
     return user["report_token"]
 
 
-def build_report(user, freq, now=None):
-    days = REPORT_FREQS[freq]
-    s = activity_summary(user["name"].strip().lower(), days, now)
-    name = user["name"]
-    period = {"daily": "today", "weekly": "this week", "monthly": "this month"}[freq]
-    under13 = is_under_13_account(user)
-    hello = "Hi,\n\n" if under13 else f"Hi {name},\n\n"
-    if s["questions"] == 0 and s["quizzes"] == 0:
-        lines = [f"{name} didn't use ThinkStep {period} — no worries! Whenever homework "
-                 f"feels tricky, ThinkStep is there to help, free."]
-    else:
-        header = (f"Here's {name}'s ThinkStep update for {period}:" if under13
-                  else f"Here's your ThinkStep update for {period}:")
-        lines = [header, ""]
-        lines.append(f"• Questions worked on: {s['questions']}")
-        lines.append(f"• Days practiced: {s['active_days']} of {days}")
-        if s["photos"]:
-            lines.append(f"• Homework photos: {s['photos']}")
-        if s["quizzes"]:
-            lines.append(f"• Quizzes finished: {s['quizzes']} "
-                         f"(got {s['quiz_right']} of {s['quiz_total']} questions right)")
-        if s["badges"]:
-            lines.append(f"• New badges: {', '.join(s['badges'])}")
-    token = user.get("report_token", "")
-    body = (hello + "\n".join(lines) + "\n\n"
-            "ThinkStep guides kids with hints and questions, so the thinking (and the "
-            "learning) is theirs.\n\n"
-            f"Change how often you get these emails, or turn them off:\n"
-            f"{APP_URL}api/report-settings/{token}\n")
-    subject = (f"{name}'s ThinkStep update" if under13 else "Your ThinkStep update")
-    return subject, body, s
-
-
-def send_due_reports(now=None):
-    """Sends every progress email that's due. Returns how many were sent."""
-    now = now or datetime.now(timezone.utc)
-    due = []
-    with _account_write_lock:
-        users = _load_users()
-        changed = False
-        for key, user in users.items():
-            freq = user.get("report_freq")
-            if freq not in REPORT_FREQS or not report_email_for(user):
-                continue
-            since = user.get("last_report_at") or user.get("report_freq_set_at")
-            try:
-                since_dt = datetime.fromisoformat(since) if since else None
-            except ValueError:
-                since_dt = None
-            if since_dt and now - since_dt < timedelta(days=REPORT_FREQS[freq]) - timedelta(minutes=30):
-                continue
-            # marked BEFORE sending, so a crash can't make it send twice
-            user["last_report_at"] = now.isoformat()
-            ensure_report_token(user)
-            changed = True
-            if since_dt is None:
-                continue  # first check after choosing: start the clock, send next time
-            due.append(dict(user))
-            if len(due) >= REPORTS_PER_RUN:
-                break
-        if changed:
-            _save_users(users)
-    sent = 0
-    for user in due:
-        subject, body, s = build_report(user, user["report_freq"], now)
-        if user["report_freq"] == "daily" and s["questions"] == 0 and s["quizzes"] == 0:
-            continue  # no "nothing today" emails every single day
-        if send_email(report_email_for(user), subject, body):
-            sent += 1
-    if sent:
-        print(f"[ThinkStep] Sent {sent} progress email(s).")
-    return sent
-
-
-def _report_loop():
-    import time as _time
-    _time.sleep(60)
-    while True:
-        try:
-            send_due_reports()
-        except Exception as e:
-            print(f"[ThinkStep] Progress emails failed this round: {e}")
-        _time.sleep(REPORT_CHECK_SECONDS)
-
-
-def start_report_thread():
-    threading.Thread(target=_report_loop, daemon=True).start()
+def progress_url(token):
+    return f"{APP_URL}progress/{token}"
 
 
 def _find_user_by_report_token(token):
@@ -3061,100 +3050,156 @@ def _find_user_by_report_token(token):
     return None, None, None
 
 
-def _report_choice_form(token, name, current=None, intro=""):
-    current = current or "weekly"
-    safe_name = html.escape(name)
-    options = "".join(
-        f'<label class="opt"><input type="radio" name="freq" value="{v}"'
-        f'{" checked" if v == current else ""}> {html.escape(label.capitalize())}</label>'
-        for v, label in (("daily", "every day"), ("weekly", "every week"),
-                         ("monthly", "every month"), ("never", "no emails, thanks")))
-    return f"""{intro}
-  <h2>How often would you like progress emails about {safe_name}?</h2>
-  <p>A short note with how many questions {safe_name} worked on, days practiced,
-  quiz scores and badges. Never what they asked.</p>
-  <form method="POST" action="/api/report-settings/{html.escape(token)}">
-    <div class="opts">{options}</div>
-    <button type="submit" class="approve-btn">Save my choice</button>
-  </form>"""
+def dashboard_data(key, user, now=None):
+    """Everything the progress dashboard shows — counts only, never what
+    was asked."""
+    now = now or datetime.now(timezone.utc)
+    tally = (STORE.read(ACTIVITY_FILE, {}) or {}).get(key, {})
+    today = now.date()
+    days = []
+    for i in range(13, -1, -1):
+        d = today - timedelta(days=i)
+        day = tally.get(d.isoformat(), {})
+        days.append({"label": d.strftime("%a")[:2], "date": d.isoformat(), "q": day.get("q", 0)})
+    streak = 0
+    d = today if tally.get(today.isoformat(), {}).get("q") else today - timedelta(days=1)
+    while tally.get(d.isoformat(), {}).get("q"):
+        streak += 1
+        d -= timedelta(days=1)
+    week, month = activity_summary(key, 7, now), activity_summary(key, 30, now)
+    for s in (week, month):
+        s["checks"] = sum(v.get("checks", 0) for day, v in tally.items()
+                          if day >= (now - timedelta(days=7 if s is week else 30)).date().isoformat())
+    return {"name": user["name"], "grade": user.get("grade", ""), "days": days, "streak": streak,
+            "week": week, "month": month, "last_seen": user.get("last_seen")}
 
 
-_REPORT_EXTRA_STYLE = """<style>
-  h2 { font-size: 17px; margin: 22px 0 8px; color: #1b2740; }
-  .opts { display: grid; gap: 8px; text-align: left; margin: 0 auto 18px; max-width: 260px; }
-  .opt { display: flex; gap: 10px; align-items: center; font-size: 15px; padding: 9px 12px;
-         border: 1px solid #dbe6fb; border-radius: 10px; cursor: pointer; }
-  .opt:has(input:checked) { border-color: #2f6fed; background: #eaf1ff; }
-  .done { font-size: 26px; margin: 0 0 4px; }
+def _ago(iso):
+    if not iso:
+        return "not yet"
+    try:
+        t = datetime.fromisoformat(iso)
+    except ValueError:
+        return "not yet"
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    secs = (datetime.now(timezone.utc) - t).total_seconds()
+    if secs < 120:
+        return "just now"
+    if secs < 3600:
+        return f"{int(secs // 60)} minutes ago"
+    if secs < 86400:
+        h = int(secs // 3600)
+        return f"{h} hour{'s' if h != 1 else ''} ago"
+    d = int(secs // 86400)
+    return f"{d} day{'s' if d != 1 else ''} ago"
+
+
+_DASH_STYLE = """<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Lexend Variable', 'Segoe UI', system-ui, sans-serif; background: #f4f8ff; color: #1b2740;
+         margin: 0; padding: 24px 16px 48px; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  .brand { font-weight: 800; color: #1e4fbf; font-size: 20px; display: flex; align-items: center; gap: 8px; }
+  .brand i { width: 10px; height: 10px; border-radius: 50%; background: #2f6fed; display: inline-block;
+             box-shadow: 0 0 0 4px #eaf1ff; }
+  h1 { font-size: 28px; margin: 18px 0 4px; }
+  .sub { color: #6b7c99; font-size: 15px; margin: 0 0 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat { background: #fff; border: 1px solid #dbe6fb; border-radius: 16px; padding: 16px; }
+  .stat .n { font-size: 30px; font-weight: 800; color: #1e4fbf; }
+  .stat .l { font-size: 13.5px; color: #6b7c99; margin-top: 2px; }
+  .card { background: #fff; border: 1px solid #dbe6fb; border-radius: 18px; padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 17px; margin: 0 0 14px; }
+  .bars { display: flex; align-items: flex-end; gap: 6px; height: 140px; }
+  .bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .bar b { width: 100%; max-width: 34px; background: linear-gradient(#5b8cff, #2f6fed); border-radius: 7px 7px 3px 3px;
+           min-height: 3px; }
+  .bar b.zero { background: #e3ebfb; }
+  .bar span { font-size: 11.5px; color: #6b7c99; margin-top: 6px; }
+  .bar em { font-style: normal; font-size: 11.5px; color: #1e4fbf; font-weight: 700; margin-bottom: 4px; min-height: 14px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+  .badges span { background: #eaf1ff; border-radius: 999px; padding: 6px 12px; font-size: 14px; }
+  .fine { font-size: 13px; color: #6b7c99; line-height: 1.6; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+  .tabs button { border: 1px solid #dbe6fb; background: #fff; border-radius: 999px; padding: 6px 14px; font: inherit;
+                 font-size: 14px; cursor: pointer; color: #1e4fbf; }
+  .tabs button.on { background: #2f6fed; color: #fff; border-color: #2f6fed; }
+  .period { display: none; } .period.on { display: grid; }
 </style>"""
 
 
-def _report_page(title, inner):
-    return Response(f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex"><title>{html.escape(title)} — ThinkStep</title>
-{_REPORT_EXTRA_STYLE}{_CONSENT_PAGE_STYLE}
-<body><div class="card">{inner}</div></body></html>""", mimetype="text/html")
+def _stat_grid(s, pid, on):
+    quiz = f"{s['quiz_right']}/{s['quiz_total']}" if s["quiz_total"] else "—"
+    cells = [(s["questions"], "questions worked on"), (s["active_days"], "days practiced"),
+             (s["photos"], "homework photos"), (s.get("checks", 0), "work checks"),
+             (s["quizzes"], "quizzes finished"), (quiz, "quiz questions right")]
+    inner = "".join(f'<div class="stat"><div class="n">{html.escape(str(n))}</div><div class="l">{l}</div></div>'
+                    for n, l in cells)
+    return f'<div class="grid period{" on" if on else ""}" id="{pid}">{inner}</div>'
 
 
-@app.route("/api/report-settings/<token>", methods=["GET"])
-def report_settings_page(token):
+@app.route("/progress/<token>")
+def progress_dashboard(token):
     key, user, _ = _find_user_by_report_token(token)
     if not user:
         return _consent_result_page("This link isn't valid",
                                     "It may have been copied incorrectly, or the account was deleted.")
-    return _report_page("Progress emails", _report_choice_form(
-        token, user["name"], user.get("report_freq"),
-        f"<h1>Progress emails</h1><p>Right now: <b>{REPORT_FREQ_LABELS.get(user.get('report_freq'), 'no emails')}</b>.</p>"))
+    d = dashboard_data(key, user)
+    name = html.escape(d["name"])
+    top = max([x["q"] for x in d["days"]] + [1])
+    bars = "".join(
+        f'<div class="bar" title="{x["date"]}: {x["q"]} questions"><em>{x["q"] or ""}</em>'
+        f'<b class="{"zero" if not x["q"] else ""}" style="height:{max(3, round(x["q"] / top * 100))}%"></b>'
+        f'<span>{x["label"]}</span></div>' for x in d["days"])
+    badges = "".join(f"<span>{html.escape(b)}</span>" for b in d["month"]["badges"]) or \
+        '<span class="fine">No new badges yet this month.</span>'
+    page = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow"><title>{name}'s progress — ThinkStep</title>
+<link rel="stylesheet" href="/static/fonts/lexend.css">{_DASH_STYLE}</head>
+<body><div class="wrap">
+  <div class="brand"><i></i>ThinkStep</div>
+  <h1>{name}'s progress</h1>
+  <p class="sub">Grade {html.escape(d["grade"] or "—")} · last active {_ago(d["last_seen"])} ·
+     {d["streak"]}-day streak 🔥</p>
+  <div class="tabs"><button class="on" data-p="w">This week</button><button data-p="m">Last 30 days</button></div>
+  {_stat_grid(d["week"], "w", True)}{_stat_grid(d["month"], "m", False)}
+  <div class="card"><h2>Questions each day (last 2 weeks)</h2><div class="bars">{bars}</div></div>
+  <div class="card"><h2>Badges earned this month</h2><div class="badges">{badges}</div></div>
+  <p class="fine">This page shows counts only — never what {name} asked. Bookmark it to check back anytime,
+  and keep the link private: anyone with it can see this page.</p>
+</div>
+<script>
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {{
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.period').forEach(p => p.classList.toggle('on', p.id === b.dataset.p));
+}});
+</script></body></html>"""
+    return Response(page, mimetype="text/html")
 
 
-@app.route("/api/report-settings/<token>", methods=["POST"])
+@app.route("/api/report-settings/<token>", methods=["GET", "POST"])
+def old_report_settings_link(token):
+    """Links from the old progress emails now open the dashboard."""
+    return redirect(f"/progress/{token}", code=302)
+
+
+@app.route("/api/my-progress")
 @locked_account_write
-def report_settings_save(token):
-    key, user, users = _find_user_by_report_token(token)
-    if not user:
-        return _consent_result_page("This link isn't valid",
-                                    "It may have been copied incorrectly, or the account was deleted.")
-    freq = request.form.get("freq", "")
-    if freq not in REPORT_FREQ_LABELS:
-        return _consent_result_page("Please pick one", "Go back and choose how often you'd like emails.")
-    _set_report_freq(user, freq)
-    users[key] = user
-    _save_users(users)
-    print(f"[ThinkStep] Progress emails for {user['name']}: {freq}")
-    msg = ("You won't get progress emails. You can turn them back on any time from this same link."
-           if freq == "never" else
-           f"You'll get a progress email {REPORT_FREQ_LABELS[freq]}. "
-           f"Every email has a link to change this.")
-    return _report_page("Saved", f'<p class="done">✅</p><h1>Saved!</h1><p>{msg}</p>')
-
-
-def _set_report_freq(user, freq):
-    if user.get("report_freq") != freq:
-        user["report_freq"] = freq
-        user["report_freq_set_at"] = datetime.now(timezone.utc).isoformat()
-        user.pop("last_report_at", None)
-    ensure_report_token(user)
-
-
-@app.route("/api/my-report-settings", methods=["POST"])
-@locked_account_write
-def my_report_settings():
-    """13+ students choose progress emails for their own email address.
-    (For under-13s only the parent can, from the link they were emailed.)"""
+def my_progress():
+    """13+ students can open their own progress page. (Under-13s: their
+    parent has it.)"""
     user = get_current_user()
     if not user:
         return jsonify({"error": "Please log in first."}), 401
     if is_under_13_account(user):
-        return jsonify({"error": "Your parent or guardian chooses this from their email."}), 403
-    freq = _s(_json_body(), "freq")
-    if freq not in REPORT_FREQ_LABELS:
-        return jsonify({"error": "Please pick how often."}), 400
+        return jsonify({"error": "Your parent or guardian has your progress page."}), 403
     key = session.get("user_key")
     users = _load_users()
-    _set_report_freq(users[key], freq)
+    token = ensure_report_token(users[key])
     _save_users(users)
-    return jsonify({"ok": True, "reportFreq": freq})
+    return jsonify({"url": f"/progress/{token}"})
 
 
 @app.route("/api/set-email", methods=["POST"])
@@ -3183,7 +3228,7 @@ def account_payload(user):
         "grade": user.get("grade", ""),
         "needsEmail": needs_email(user),
         "under13": is_under_13_account(user),
-        "reportFreq": user.get("report_freq") or "never",
+        "hasProgressPage": not is_under_13_account(user),
     }
 
 
@@ -3392,6 +3437,7 @@ def chat():
     # A homework photo with this question? (Only ever the newest message —
     # older photos travel as their written-out notes instead.)
     photo = data.get("image")
+    check_work = data.get("checkWork") is True
     photo_size = None
     if photo is not None:
         if not valid_photo_data_url(photo):
@@ -3504,6 +3550,15 @@ def chat():
             "giving the answer outright."
         )
 
+    # "Explain simple" button: re-explain the last reply as simply as possible.
+    if profile.get("simple") is True:
+        student_info_lines.append(
+            "- EXPLAIN SIMPLE: the student pressed the Explain simple button. Explain your last "
+            "reply again in the simplest way possible, like you would to a 5-year-old: tiny everyday "
+            "words, one real-life example (pizza slices, toys, candy), 2 or 3 very short sentences, "
+            "then one easy question. Still don't give away the final answer."
+        )
+
     # A quiz the student chose to take (the page keeps count of how far
     # along it is, so the tutor knows which question number comes next).
     quiz = profile.get("quiz")
@@ -3592,7 +3647,7 @@ def chat():
             # A homework photo is read first: its text goes into the tutor's
             # private notes, and the green-box data goes to the page.
             if photo:
-                reading = read_homework_photo(photo, last_user_msg, groq_api_key, photo_size)
+                reading = read_homework_photo(photo, last_user_msg, groq_api_key, photo_size, check_work)
                 if reading is None:
                     q.put(NOTICE + "I couldn't read that photo right now. Try a clearer, "
                           "brighter picture — or type the problem and I'll help! 📸")
@@ -3613,10 +3668,12 @@ def chat():
                     "notes": reading["notes"],
                     "problems": reading["problems"],
                     "focus": reading["focus"],
+                    **({"check": True, "steps": reading["steps"], "firstError": reading["first_error"]}
+                       if check_work else {}),
                 }) + PHOTO_MARK)
                 payload["messages"][0] = {
                     "role": "system",
-                    "content": payload["messages"][0]["content"] + photo_notes_block(reading),
+                    "content": payload["messages"][0]["content"] + photo_notes_block(reading, check_work),
                 }
             # Web research first (only for questions the gate flagged). The
             # notes go at the END of the tutor's instructions, after the
@@ -3740,7 +3797,8 @@ def chat():
         # a timeout, connection error, or crash shouldn't cost them anything.
         # (Accounts have no question limit, so there's nothing to count.)
         if succeeded and user:
-            record_activity(account_key, questions=1, photos=1 if photo else 0)
+            record_activity(account_key, questions=1, photos=1 if photo else 0,
+                            checks=1 if (photo and check_work) else 0)
         if succeeded and not user:
             record_guest_usage(guest_id, visitor)
             print(f"[ThinkStep] Guest {guest_id} usage: {guest_questions_used(guest_id)}/{GUEST_QUESTION_LIMIT}")
@@ -3761,7 +3819,6 @@ def on_server_start():
         return
     _server_started = True
     start_backup_thread()
-    start_report_thread()
     for w in setup_warnings():
         print(f"[ThinkStep] SETUP WARNING: {w}")
 
