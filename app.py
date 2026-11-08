@@ -392,11 +392,13 @@ def _rest_backup(name, seconds=BACKUP_REST_SECONDS):
         _backup_state["rest_until"][name] = time.time() + seconds
 
 
-def answer_with_backup(messages, emit, who="someone", need_room=True):
+def answer_with_backup(messages, emit, who="someone", need_room=True, prefer=None):
     """Streams an answer from the first backup (in order) that has room,
     calling emit(text) for each piece. Returns (provider_name, finish_reason),
     or (None, None) if no backup could answer before anything was shown."""
-    for p in backups_ready(need_room=need_room):
+    order = backups_ready(need_room=need_room)
+    order.sort(key=lambda p: p["name"] != prefer)  # the balancer's pick goes first
+    for p in order:
         key = (os.environ.get(p["key_env"]) or "").strip()
         model = (os.environ.get(p["model_env"]) or "").strip() or p["model"]
         headers = {"Authorization": f"Bearer {key}"}
@@ -448,6 +450,125 @@ def answer_with_backup(messages, emit, who="someone", need_room=True):
             return p["name"], finish
         _rest_backup(p["name"], 60)  # empty answer
     return None, None
+
+
+# ---- Load balancer: a small Cloudflare AI keeps things fair ----
+# Whenever more than one student is using ThinkStep and a backup AI has an
+# open slot, a small Cloudflare model looks at the numbers — how many
+# questions each student asked lately, how busy each AI is, which have room
+# — and DECIDES where this student's question should go (Groq, OpenRouter
+# or Mistral) so nobody hogs Groq and everyone gets fast answers. There are
+# no fixed fairness rules: the model makes the call.
+# It only ever sees numbers, never names or questions.
+# If Cloudflare isn't set up or doesn't answer, the student simply stays on
+# Groq. (Groq's hard limit of GROQ_LIMIT at once still applies.)
+# Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN on Render to turn it on.
+BALANCE_WINDOW = 5 * 60          # it sees the last 5 minutes of questions
+CLOUDFLARE_DEFAULT_MODEL = "@cf/openai/gpt-oss-20b"
+BALANCER_PROMPT = """You are the load balancer for a homework tutor app for kids. Your goal: every
+student gets fast, good answers, and no single student hogs the main AI.
+You get live numbers: how many questions each student asked in the last 5
+minutes (students are anonymous; "this_student" is the one asking now), how many
+students each AI is answering right now, and its slots. Groq is the main AI and
+the best; backups are also good. Decide which AI should answer this student's
+question. Use your judgement to keep things fair and fast for everyone.
+Only pick an AI that has an open slot.
+Reply with JSON only: {"send_to": "<AI name>", "reason": "a few words"}"""
+_balance = {"asks": {}, "log": [], "cf_checks": 0, "cf_rest_until": 0.0}
+
+
+def note_question(who):
+    """Remember when each student asks, for the balancer."""
+    now = time.time()
+    with _backup_lock:
+        times = [t for t in _balance["asks"].get(who, []) if now - t < BALANCE_WINDOW]
+        times.append(now)
+        _balance["asks"][who] = times
+        for k in [k for k, v in _balance["asks"].items() if not v or now - v[-1] > BALANCE_WINDOW]:
+            del _balance["asks"][k]
+
+
+def _cloudflare_config():
+    acct = (os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
+    token = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+    if not acct or not token:
+        return None
+    model = (os.environ.get("CLOUDFLARE_MODEL") or "").strip() or CLOUDFLARE_DEFAULT_MODEL
+    return (f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/v1/chat/completions",
+            token, model)
+
+
+def _ask_cloudflare(facts):
+    """The Cloudflare model's reply text, or None if it couldn't answer."""
+    cfg = _cloudflare_config()
+    if not cfg or _balance["cf_rest_until"] > time.time():
+        return None
+    url, token, model = cfg
+    try:
+        r = requests.post(url, headers={"Authorization": f"Bearer {token}"}, json={
+            "model": model,
+            "messages": [{"role": "system", "content": BALANCER_PROMPT},
+                         {"role": "user", "content": json.dumps(facts)}],
+            "max_tokens": 300,
+            "temperature": 0,
+        }, timeout=(3, 6))
+        if r.status_code != 200:
+            print(f"[ThinkStep] Balancer: Cloudflare said {r.status_code} — keeping students on Groq for a bit.")
+            _balance["cf_rest_until"] = time.time() + 120
+            return None
+        _balance["cf_checks"] += 1
+        return ((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    except Exception as e:
+        print(f"[ThinkStep] Balancer: Cloudflare error ({type(e).__name__}) — keeping students on Groq.")
+        _balance["cf_rest_until"] = time.time() + 60
+        return None
+
+
+def choose_provider(who):
+    """The backup the Cloudflare model picked for this student, or None to
+    stay on Groq."""
+    open_backups = backups_ready(need_room=True)
+    if not open_backups or not _cloudflare_config():
+        return None
+    now = time.time()
+    with _backup_lock:
+        counts = {k: len(v) for k, v in _balance["asks"].items()}
+    if len(counts) < 2:
+        return None  # only one student around — nothing to balance
+    others = sorted((c for k, c in counts.items() if k != who), reverse=True)
+    mine = counts.get(who, 0)
+    open_names = [p["name"] for p in open_backups]
+    facts = {
+        "this_student_questions_last_5_min": mine,
+        "other_students_questions_last_5_min": others,
+        "ais": [{"name": "Groq", "answering_now": groq_active_count(), "slots": GROQ_LIMIT}] + [
+            {"name": p["name"], "answering_now": provider_count(p["name"]), "slots": p["limit"]}
+            for p in open_backups],
+    }
+    text = _ask_cloudflare(facts)
+    if text is None:
+        return None
+    m = re.search(r'"?send_to"?\s*[:=]\s*"([^"]+)"', text)
+    pick = m.group(1).strip() if m else ""
+    choice = next((n for n in open_names if n.lower() == pick.lower()), None)
+    reason_m = re.search(r'"?reason"?\s*[:=]\s*"([^"]{0,80})', text)
+    with _backup_lock:
+        _balance["log"].append({"who": who, "sendTo": choice or "Groq", "mine": mine,
+                                "reason": reason_m.group(1) if reason_m else "",
+                                "time": now})
+        _balance["log"] = _balance["log"][-20:]
+    return choice
+
+
+def balancer_status():
+    cfg = _cloudflare_config()
+    now = time.time()
+    with _backup_lock:
+        log = list(_balance["log"])
+    return {"ready": bool(cfg), "model": cfg[2] if cfg else None,
+            "resting": _balance["cf_rest_until"] > now, "checks": _balance["cf_checks"],
+            "recent": [{**{k: v for k, v in d.items() if k != "time"},
+                        "secondsAgo": int(now - d["time"])} for d in reversed(log)]}
 
 
 def _log_groq_usage(model_id, effort, usage):
@@ -2599,7 +2720,8 @@ def admin_errors():
     hour, day = _error_counts(entries)
     return jsonify({"errors": list(reversed(entries))[:100],
                     "lastHour": hour, "last24h": day,
-                    "providers": backup_status()})
+                    "providers": backup_status(),
+                    "balancer": balancer_status()})
 
 
 # Errors the page saw that never reached the server (internet dropped,
@@ -4090,9 +4212,16 @@ def chat():
 
             try:
                 # Groq crowded? Send this student to a backup provider.
-                # Groq full? Quietly send this student to the next AI with room.
-                if groq_active_count() >= GROQ_LIMIT and backups_ready(need_room=True):
-                    name, bfinish = answer_with_backup(payload["messages"], emit, who_label)
+                # Groq full — or this student is hogging a crowded Groq?
+                # Quietly send them to the next AI with room.
+                note_question(who_label)
+                pick = None
+                if backups_ready(need_room=True):
+                    pick = (choose_provider(who_label)
+                            or ("full" if groq_active_count() >= GROQ_LIMIT else None))
+                if pick:
+                    name, bfinish = answer_with_backup(payload["messages"], emit, who_label,
+                                                       prefer=pick)
                     if name:
                         backup_used = (name, bfinish)
                         ladder = []
