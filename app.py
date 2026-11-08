@@ -30,6 +30,7 @@ import threading
 import queue
 import uuid
 import secrets
+import time
 import hmac
 import hashlib
 import smtplib
@@ -277,6 +278,176 @@ TUTOR_ATTEMPTS = [
 # its own separate allowance, so this roughly doubles how many questions
 # ThinkStep can answer per day for free.
 RATE_LIMIT_FALLBACK = {"openai/gpt-oss-120b": "openai/gpt-oss-20b"}
+
+# ---- Backup AI providers (for when Groq is crowded) ----
+# Each provider answers up to its limit of students AT THE SAME MOMENT:
+#   Groq 5  →  then OpenRouter 4  →  then Mistral 4  (→ Gemini 4, if a key is set)
+# The 6th student at once goes to OpenRouter, the 10th to Mistral, and so
+# on. If every provider is full, Groq takes them anyway (it just waits).
+# A backup is also tried if Groq says "busy" (429) for every model.
+# A backup is only used if its key is set on Render (Environment tab).
+# Students are never told they were switched — the answer just arrives.
+# A backup that fails takes a short rest before it's tried again.
+# Photos are still read by Groq; only the typed answer comes from a backup.
+def _limit(env, default):
+    try:
+        return max(1, int(os.environ.get(env, "") or default))
+    except ValueError:
+        return default
+
+
+GROQ_LIMIT = _limit("GROQ_LIMIT", 5)
+BACKUP_PROVIDERS = [
+    {"name": "OpenRouter", "key_env": "OPENROUTER_API_KEY", "model_env": "OPENROUTER_MODEL",
+     "model": "openai/gpt-oss-120b:free", "limit": _limit("OPENROUTER_LIMIT", 4),
+     "url": "https://openrouter.ai/api/v1/chat/completions"},
+    {"name": "Mistral", "key_env": "MISTRAL_API_KEY", "model_env": "MISTRAL_MODEL",
+     "model": "mistral-medium-latest", "limit": _limit("MISTRAL_LIMIT", 4),
+     "url": "https://api.mistral.ai/v1/chat/completions"},
+    {"name": "Gemini", "key_env": "GEMINI_API_KEY", "model_env": "GEMINI_MODEL",
+     "model": "gemini-flash-latest", "limit": _limit("GEMINI_LIMIT", 4),
+     "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"},
+]
+BACKUP_REST_SECONDS = 120
+RECENT_PROVIDER_SECONDS = 15 * 60
+_backup_lock = threading.Lock()
+# active: provider -> {ticket: who}   recent: who -> (provider, time)
+_backup_state = {"active": {}, "rest_until": {}, "answers": {}, "recent": {}}
+
+
+def provider_count(name):
+    with _backup_lock:
+        return len(_backup_state["active"].get(name, {}))
+
+
+def groq_active_count():
+    return provider_count("Groq")
+
+
+def _provider_start(name, who):
+    ticket = uuid.uuid4().hex
+    with _backup_lock:
+        _backup_state["active"].setdefault(name, {})[ticket] = who
+        _backup_state["recent"][who] = (name, time.time())
+    return ticket
+
+
+def _provider_end(name, ticket):
+    with _backup_lock:
+        _backup_state["active"].get(name, {}).pop(ticket, None)
+
+
+def backups_ready(need_room=False):
+    """Backups that have a key set and aren't resting after a failure
+    (and, with need_room, aren't already at their limit), in order."""
+    now = time.time()
+    with _backup_lock:
+        rest = dict(_backup_state["rest_until"])
+        counts = {k: len(v) for k, v in _backup_state["active"].items()}
+    return [p for p in BACKUP_PROVIDERS
+            if (os.environ.get(p["key_env"]) or "").strip()
+            and rest.get(p["name"], 0) <= now
+            and (not need_room or counts.get(p["name"], 0) < p["limit"])]
+
+
+def backup_status():
+    """For the admin page: who is on which AI right now, and recently."""
+    now = time.time()
+    with _backup_lock:
+        rest = dict(_backup_state["rest_until"])
+        answers = dict(_backup_state["answers"])
+        active = {k: list(v.values()) for k, v in _backup_state["active"].items()}
+        for who, (_, t) in list(_backup_state["recent"].items()):
+            if now - t > RECENT_PROVIDER_SECONDS:
+                del _backup_state["recent"][who]
+        recent = dict(_backup_state["recent"])
+
+    def recent_for(name):
+        rows = sorted(((t, who) for who, (p, t) in recent.items() if p == name), reverse=True)
+        return [{"who": who, "secondsAgo": int(now - t)} for t, who in rows]
+
+    providers = [{"name": "Groq", "ready": True, "resting": False, "limit": GROQ_LIMIT,
+                  "answers": answers.get("Groq", 0), "now": active.get("Groq", []),
+                  "recent": recent_for("Groq")}]
+    for p in BACKUP_PROVIDERS:
+        providers.append({
+            "name": p["name"],
+            "ready": bool((os.environ.get(p["key_env"]) or "").strip()),
+            "resting": rest.get(p["name"], 0) > now,
+            "limit": p["limit"],
+            "answers": answers.get(p["name"], 0),
+            "now": active.get(p["name"], []),
+            "recent": recent_for(p["name"]),
+        })
+    return {"providers": providers}
+
+
+def _count_answer(name):
+    with _backup_lock:
+        _backup_state["answers"][name] = _backup_state["answers"].get(name, 0) + 1
+
+
+def _rest_backup(name, seconds=BACKUP_REST_SECONDS):
+    with _backup_lock:
+        _backup_state["rest_until"][name] = time.time() + seconds
+
+
+def answer_with_backup(messages, emit, who="someone", need_room=True):
+    """Streams an answer from the first backup (in order) that has room,
+    calling emit(text) for each piece. Returns (provider_name, finish_reason),
+    or (None, None) if no backup could answer before anything was shown."""
+    for p in backups_ready(need_room=need_room):
+        key = (os.environ.get(p["key_env"]) or "").strip()
+        model = (os.environ.get(p["model_env"]) or "").strip() or p["model"]
+        headers = {"Authorization": f"Bearer {key}"}
+        if p["name"] == "OpenRouter":
+            headers["X-Title"] = "ThinkStep"
+        body = {"model": model, "messages": messages, "stream": True, "max_tokens": 4096}
+        got_any = False
+        finish = None
+        ticket = _provider_start(p["name"], who)
+        try:
+            with requests.post(p["url"], headers=headers, json=body, stream=True, timeout=(10, 90)) as r:
+                if r.status_code != 200:
+                    print(f"[ThinkStep] Backup {p['name']} said {r.status_code} — resting it for a bit.")
+                    _rest_backup(p["name"])
+                    continue
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    raw = line.decode("utf-8")
+                    if not raw.startswith("data: "):
+                        continue
+                    raw = raw[len("data: "):]
+                    if raw.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw)
+                    except ValueError:
+                        continue
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    content = (choices[0].get("delta") or {}).get("content") or ""
+                    if content:
+                        emit(content)
+                        got_any = True
+                    finish = choices[0].get("finish_reason") or finish
+        except requests.exceptions.RequestException as e:
+            print(f"[ThinkStep] Backup {p['name']} failed ({type(e).__name__}) — resting it for a bit.")
+            _rest_backup(p["name"])
+            if got_any:  # part of an answer is already on screen; can't switch now
+                _count_answer(p["name"])
+                return p["name"], "cut"
+            continue
+        finally:
+            _provider_end(p["name"], ticket)
+        if got_any:
+            _count_answer(p["name"])
+            print(f"[ThinkStep] Answered by backup {p['name']} ({model}).")
+            return p["name"], finish
+        _rest_backup(p["name"], 60)  # empty answer
+    return None, None
 
 
 def _log_groq_usage(model_id, effort, usage):
@@ -2427,7 +2598,8 @@ def admin_errors():
     entries = _load_errors()
     hour, day = _error_counts(entries)
     return jsonify({"errors": list(reversed(entries))[:100],
-                    "lastHour": hour, "last24h": day})
+                    "lastHour": hour, "last24h": day,
+                    "providers": backup_status()})
 
 
 # Errors the page saw that never reached the server (internet dropped,
@@ -3909,7 +4081,23 @@ def chat():
             fallback_model = RATE_LIMIT_FALLBACK.get(model)
             used_fallback = False
             streamed_any = False
+            on_groq = False
+            backup_used = None  # (provider_name, finish) if a backup answered
+
+            def emit(text):
+                q.put(text)
+                answer_parts.append(text)
+
             try:
+                # Groq crowded? Send this student to a backup provider.
+                # Groq full? Quietly send this student to the next AI with room.
+                if groq_active_count() >= GROQ_LIMIT and backups_ready(need_room=True):
+                    name, bfinish = answer_with_backup(payload["messages"], emit, who_label)
+                    if name:
+                        backup_used = (name, bfinish)
+                        ladder = []
+                if ladder:
+                    on_groq = _provider_start("Groq", who_label)
                 while ladder:
                     attempt_model, extra = ladder.pop(0)
                     body = dict(payload, model=attempt_model, **extra)
@@ -3936,6 +4124,12 @@ def chat():
                                 ladder.append((fallback_model, {}))
                                 print(f"[ThinkStep] {attempt_model} busy — answering with {fallback_model} instead.")
                                 continue
+                            # Every Groq model is busy — try a backup provider.
+                            name, bfinish = answer_with_backup(payload["messages"], emit,
+                                                               who_label, need_room=False)
+                            if name:
+                                backup_used = (name, bfinish)
+                                break
                         r.raise_for_status()
                         for line in r.iter_lines():
                             if not line:
@@ -3974,6 +4168,16 @@ def chat():
                     result["succeeded"] = streamed_any
                     result["model_used"] = attempt_model
                     break
+                if backup_used:
+                    name, bfinish = backup_used
+                    if bfinish == "length":
+                        q.put("\n\n(I ran out of room there — say \"keep going\" and I'll finish!)")
+                    elif bfinish == "cut":
+                        q.put("\n\n(I got cut off — say \"keep going\" and I'll finish!)")
+                    if used_web_notes and not _looks_like_refusal("".join(answer_parts)):
+                        q.put(WEB_INDICATOR)
+                    result["succeeded"] = True
+                    result["model_used"] = name
             except requests.exceptions.ConnectionError:
                 note_error(error_person, who_label, "groq unreachable", "Couldn't connect to Groq.")
                 q.put(NOTICE + "\n\n[Couldn't reach Groq. Check your internet connection and try again.]")
@@ -3996,6 +4200,10 @@ def chat():
                 note_error(error_person, who_label, "tutor crash", f"{type(e).__name__}: {e}")
                 q.put(NOTICE + f"\n\n[Error talking to Groq: {e}]")
             finally:
+                if on_groq:
+                    _provider_end("Groq", on_groq)
+                    if result.get("succeeded") and not backup_used:
+                        _count_answer("Groq")
                 q.put(SENTINEL)
 
         t = threading.Thread(target=worker, daemon=True)
