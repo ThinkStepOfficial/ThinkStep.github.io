@@ -490,6 +490,22 @@ async function fetchErrors() {
           <div style="margin-top:2px;font-size:12.5px;color:var(--muted);">Recently: ${recent}</div>
         </div>`;
       }).join('');
+      const bal = data.balancer;
+      if (bal) {
+        const bState = !bal.ready ? 'no Cloudflare key — everyone stays on Groq'
+          : bal.resting ? 'Cloudflare resting — everyone stays on Groq for now'
+          : `ready (${escapeHtml(bal.model || '')})`;
+        const decisions = bal.recent.length
+          ? bal.recent.slice(0, 8).map(d => `<div style="font-size:12.5px;">
+              ${d.sendTo === 'Groq' ? '✅ kept on Groq' : '➡️ sent to ' + escapeHtml(d.sendTo)}:
+              <b>${escapeHtml(d.who)}</b> · ${d.mine} questions in 5 min
+              ${d.reason ? '· “' + escapeHtml(d.reason) + '”' : ''} · ${ago(d.secondsAgo)}</div>`).join('')
+          : '<div style="font-size:12.5px;color:var(--muted);">No decisions yet — it decides when 2+ kids are on and a backup has room.</div>';
+        pvEl.innerHTML += `<div class="flag-row" style="display:block;">
+          <div><span class="flag-who">Cloudflare balancer</span>
+            <span class="flag-time">${bState} · ${bal.checks} decisions since restart</span></div>
+          <div style="margin-top:4px;">${decisions}</div></div>`;
+      }
     }
     if (!data.errors || data.errors.length === 0) {
       errorsListEl.innerHTML = '<div class="empty-note">No errors — everything is working. 🎉</div>';
