@@ -1143,6 +1143,13 @@
     z-index: 110; align-items: center; justify-content: center; padding: 16px;
   }
   #emailOverlay.open { display: flex; }
+  #addEmailBtn { display: none; font-size: 13.5px; padding: 6px 11px; border-radius: 999px; background: #fef3c7;
+                 color: #92400e; border: 1px solid #fcd34d; box-shadow: none; white-space: nowrap; }
+  #addEmailBtn.show { display: inline-flex; align-items: center; }
+  #addEmailBtn:hover { background: #fde68a; }
+  .unlock-list { margin: 8px 0 14px; padding-left: 20px; font-size: 14.5px; line-height: 1.7; color: var(--text); }
+  .lock-note { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .feature-locked { opacity: .55; }
 
   /* ===== READING FONT (dyslexia-friendly option) ===== */
   @font-face { font-family: 'OpenDyslexic'; src: url('/static/fonts/opendyslexic-regular.woff2') format('woff2');
@@ -1247,6 +1254,7 @@
       </div>
     </div>
     <div class="model-picker">
+      <button type="button" id="addEmailBtn" title="Add your email to unlock every feature">📧 Add email</button>
       <button type="button" id="avatarBtn" class="avatar-btn" title="Your profile picture" aria-label="Your profile picture">😀</button>
       <button type="button" id="themeToggle" class="icon-btn" title="Night mode" aria-label="Night mode">🌙</button>
       <button type="button" id="toolsToggle" class="nav-toggle" title="Tools">🛠</button>
@@ -1419,7 +1427,7 @@
       <div id="recoveryEmailWrap" style="display:none;">
         <label for="accRecoveryEmail">Your email</label>
         <input id="accRecoveryEmail" type="email" autocomplete="email" maxlength="254" />
-        <div class="field-hint">Every account needs one. It's how you get back in if you forget your password (and you can get progress emails if you want them).</div>
+        <div class="field-hint">Optional — but without an email you only get the basic tutor. An email unlocks photos, read aloud, quizzes, badges, saving and searching chats, your progress page, and password resets.</div>
       </div>
       <label class="remember-row"><input type="checkbox" id="accRemember" checked /> Keep me signed in</label>
       <div class="error-msg" id="accountError"></div>
@@ -1440,7 +1448,7 @@
   <div class="account-modal">
     <button type="button" class="close-btn" id="forgotPasswordClose">✕</button>
     <h2>Reset your password</h2>
-    <div class="sub">Enter your account name — if it has a recovery email on file, we'll send a reset link to it.</div>
+    <div class="sub">Enter your account name — if it has an email on file, we'll send a reset link to it. (Accounts without an email can't reset their password.)</div>
     <form id="forgotPasswordForm">
       <label for="fpName">Your name</label>
       <input id="fpName" type="text" autocomplete="name" maxlength="60" required />
@@ -1453,15 +1461,24 @@
 
 <div id="emailOverlay">
   <div class="account-modal">
-    <h2>One quick thing 📧</h2>
-    <div class="sub">Every ThinkStep account needs an email now. It's how you get back in if you ever forget your password.</div>
+    <button type="button" class="close-btn" id="emailClose">✕</button>
+    <h2 id="emailTitle">Unlock everything 📧</h2>
+    <div class="sub" id="emailSub">Add your email to get all of ThinkStep:</div>
+    <ul class="unlock-list">
+      <li>📷 Homework photos + Check my work</li>
+      <li>🔊 Read aloud + 🗣 Talk mode</li>
+      <li>🎯 Quizzes, 🏅 badges + profile emojis</li>
+      <li>🧸 Explain simple</li>
+      <li>⭐ Star + search your chats, 📊 your progress page</li>
+      <li>🔑 Resetting your password if you forget it</li>
+    </ul>
     <form id="emailForm">
       <label for="emailInput">Your email</label>
       <input id="emailInput" type="email" autocomplete="email" maxlength="254" required />
       <div class="error-msg" id="emailError"></div>
       <button type="submit" class="submit-btn" id="emailSaveBtn">Save</button>
     </form>
-    <div class="switch-mode"><button type="button" id="emailLogout">Log out instead</button></div>
+    <div class="switch-mode"><button type="button" id="emailLater">Not now</button></div>
   </div>
 </div>
 
@@ -1624,10 +1641,12 @@ function renderBadges(freshId) {
     el.title = have.has(b.id) ? `${b.name} — earned!` : `${b.name}: ${b.how}`;
     shelf.appendChild(el);
   });
-  document.getElementById('badgeCount').textContent =
-    have.size ? `${have.size} of ${BADGE_DEFS.length} badges` : 'Badges to earn — hover to see how';
+  document.getElementById('badgeCount').textContent = !hasFull()
+    ? '🔒 Badges need an account with an email'
+    : have.size ? `${have.size} of ${BADGE_DEFS.length} badges` : 'Badges to earn — hover to see how';
 }
 function earnBadge(id) {
+  if (!hasFull()) return;  // badges need an account with an email
   const have = myBadges();
   const def = BADGE_DEFS.find(b => b.id === id);
   if (!def || have.includes(id)) return;
@@ -1713,6 +1732,7 @@ function handleQuizTags(active, tags, aiDiv) {
   if (tags.offer) addQuizOffer(aiDiv);
 }
 function addQuizOffer(aiDiv) {
+  if (!hasFull()) return;  // quizzes need an account with an email
   const box = document.createElement('div');
   box.className = 'quiz-offer';
   box.innerHTML = '<span class="lbl">Quiz me:</span>';
@@ -1781,7 +1801,10 @@ document.querySelectorAll('.voice-btn').forEach(b => b.addEventListener('click',
   stopSpeaking();
 }));
 voiceSelect.addEventListener('change', () => { lsSet('thinkstep_voice_' + voiceGender(), voiceSelect.value); stopSpeaking(); });
-autoReadBox.addEventListener('change', () => lsSet('thinkstep_autoread', autoReadBox.checked ? '1' : ''));
+autoReadBox.addEventListener('change', () => {
+  if (autoReadBox.checked && needsUnlock('Read aloud')) { autoReadBox.checked = false; return; }
+  lsSet('thinkstep_autoread', autoReadBox.checked ? '1' : '');
+});
 document.getElementById('voiceSample').addEventListener('click', (e) => {
   const name = voiceSelect.options[voiceSelect.selectedIndex].textContent;
   speakMessage(`Hi! I'm ${name}. Let's figure it out together, one step at a time.`, e.currentTarget);
@@ -1945,6 +1968,7 @@ function stopSpeaking() {
 }
 
 async function speakMessage(text, btn) {
+  if (!hasFull()) { needsUnlock('Read aloud'); return; }
   const wasThis = btn && btn === speakingBtn;
   stopSpeaking();
   if (wasThis) return;            // second tap = stop
@@ -1984,7 +2008,7 @@ function attachSayButton(div, text) {
   sb.textContent = '🧸 Explain simple';
   sb.title = 'Explain this again in the simplest way';
   sb.addEventListener('click', () => {
-    if (busy) return;
+    if (busy || needsUnlock('Explain simple')) return;
     const short = stripTags(text).replace(/\s+/g, ' ').slice(0, 220);
     sendMessage(`Can you explain this in a simpler way? "${short}${text.length > 220 ? '…' : ''}"`, { simple: true });
   });
@@ -2003,10 +2027,52 @@ const emailOverlay = document.getElementById('emailOverlay');
 const emailForm = document.getElementById('emailForm');
 const emailInput = document.getElementById('emailInput');
 const emailError = document.getElementById('emailError');
-function openEmailModal() {
+/* ---- Features that need an account with an email ----
+   Guests and accounts without an email get the basic tutor (asking
+   questions, night mode, easy-read font). Everything else needs an email. */
+function hasFull() {
+  try { return !!(currentUser && !currentUser.needsEmail); } catch { return false; }
+}
+function needsUnlock(what) {
+  if (hasFull()) return false;
+  if (currentUser) openEmailModal('locked', what);
+  else { showToast(`🔒 ${what} needs a free account with an email.`, 4200); openAccountModal('signup'); }
+  return true;
+}
+const EMAIL_MODAL_TEXT = {
+  signup: ['Your account is ready! 📧', "You made your account without an email, so you only get the basic tutor. You won't get these until you add one:"],
+  nudge:  ['Want more from ThinkStep? 📧', 'Add your email to unlock:'],
+  button: ['Unlock everything 📧', 'Add your email to get all of ThinkStep:'],
+};
+function openEmailModal(mode = 'button', what = '') {
+  const [title, sub] = mode === 'locked'
+    ? [`🔒 ${what} needs an email`, `Add your email to unlock ${what.toLowerCase()} and everything else:`]
+    : (EMAIL_MODAL_TEXT[mode] || EMAIL_MODAL_TEXT.button);
+  document.getElementById('emailTitle').textContent = title;
+  document.getElementById('emailSub').textContent = sub;
   emailError.classList.remove('show');
   emailOverlay.classList.add('open');
   setTimeout(() => emailInput.focus(), 50);
+}
+function closeEmailModal() { emailOverlay.classList.remove('open'); }
+function updateEmailUI() {
+  const btn = document.getElementById('addEmailBtn');
+  btn.classList.toggle('show', !!(currentUser && currentUser.needsEmail));
+  const readCard = document.getElementById('voiceSample');
+  if (readCard) readCard.closest('.tool-card').classList.toggle('feature-locked', !hasFull());
+  document.getElementById('chatSearch').placeholder = hasFull() ? '🔍 Search your chats' : '🔒 Search needs an email';
+  renderBadges();
+}
+document.getElementById('addEmailBtn').addEventListener('click', () => openEmailModal('button'));
+document.getElementById('emailClose').addEventListener('click', closeEmailModal);
+document.getElementById('emailLater').addEventListener('click', closeEmailModal);
+emailOverlay.addEventListener('click', (e) => { if (e.target === emailOverlay) closeEmailModal(); });
+// every 5 questions, an account without an email is reminded once
+function maybeNudgeForEmail() {
+  if (!currentUser || !currentUser.needsEmail) return;
+  const n = parseInt(pGet('noEmailQuestions') || '0', 10) + 1;
+  pSet('noEmailQuestions', String(n));
+  if (n % 5 === 0 && !talkModeOn) openEmailModal('nudge');
 }
 emailForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -2020,7 +2086,9 @@ emailForm.addEventListener('submit', async (e) => {
     if (!res.ok) throw new Error(r.error || 'Something went wrong — try again.');
     if (currentUser) currentUser.needsEmail = false;
     emailOverlay.classList.remove('open');
-    showToast('📧 Email saved — thanks!');
+    renderAccountStatus();
+    updateEmailUI();
+    showToast('📧 Email saved — everything is unlocked! 🎉', 4200);
   } catch (err) {
     emailError.textContent = err.message;
     emailError.classList.add('show');
@@ -2028,13 +2096,14 @@ emailForm.addEventListener('submit', async (e) => {
     btn.disabled = false;
   }
 });
-document.getElementById('emailLogout').addEventListener('click', async () => {
-  emailOverlay.classList.remove('open');
-  await logoutUser();
-});
+
 
 function reportSettingHtml() {
   if (!currentUser) return '';
+  if (currentUser.needsEmail) {
+    return '<div class="report-row">📧 No email yet — you have the basic tutor. ' +
+           '<button type="button" class="link-btn" id="cardAddEmail">Add email</button></div>';
+  }
   if (!currentUser.hasProgressPage) {
     return '<div class="report-row">📊 Your parent can see your progress on their dashboard.</div>';
   }
@@ -2043,6 +2112,8 @@ function reportSettingHtml() {
 function wireReportSetting() {
   const b = document.getElementById('myProgressBtn');
   if (b) b.addEventListener('click', openMyProgress);
+  const a = document.getElementById('cardAddEmail');
+  if (a) a.addEventListener('click', () => openEmailModal('button'));
 }
 
 /* =====================================================================
@@ -2100,7 +2171,10 @@ function renderEmojiPicker() {
     box.appendChild(grid);
   });
 }
-function openAvatarPicker() { renderEmojiPicker(); renderAvatar(); avatarOverlay.classList.add('open'); }
+function openAvatarPicker() {
+  if (needsUnlock('Profile pictures')) return;
+  renderEmojiPicker(); renderAvatar(); avatarOverlay.classList.add('open');
+}
 avatarBtn.addEventListener('click', openAvatarPicker);
 document.getElementById('avatarClose').addEventListener('click', () => avatarOverlay.classList.remove('open'));
 avatarOverlay.addEventListener('click', (e) => { if (e.target === avatarOverlay) avatarOverlay.classList.remove('open'); });
@@ -2206,13 +2280,14 @@ function startTalkMode() {
   earnBadge('talk');
   talkListen();
 }
-talkBtn.addEventListener('click', () => talkModeOn ? stopTalkMode() : startTalkMode());
+talkBtn.addEventListener('click', () => talkModeOn ? stopTalkMode() : (needsUnlock('Talk mode') || startTalkMode()));
 document.getElementById('talkStop').addEventListener('click', () => { stopSpeaking(); stopTalkMode(); });
 
 /* =====================================================================
    Progress page link in the Account box.
    ===================================================================== */
 async function openMyProgress() {
+  if (needsUnlock('Your progress page')) return;
   try {
     const r = await fetch('/api/my-progress', { cache: 'no-store' });
     const d = await r.json();
@@ -2457,7 +2532,8 @@ accountForm.addEventListener('submit', async (e) => {
     switchStorageOwner(currentUser);
     closeAccountModal();
     renderAccountStatus();
-    if (result.needsEmail) openEmailModal();
+    updateEmailUI();
+    if (result.needsEmail && accountModalMode === 'signup') openEmailModal('signup');
     renderFormulaSheet(currentUser.grade);
     if (!getActive().messages.length) renderEmptyState();
   } catch (err) {
@@ -2475,6 +2551,7 @@ async function logoutUser() {
   currentUser = null;
   switchStorageOwner(null);  // the next person can't see this kid's chats
   renderAccountStatus();
+  updateEmailUI();
   renderFormulaSheet('');
 }
 
@@ -2615,7 +2692,7 @@ async function initAccount() {
   } catch {}
   switchStorageOwner(currentUser);
   renderAccountStatus();
-  if (currentUser && currentUser.needsEmail) openEmailModal();
+  updateEmailUI();
   renderFormulaSheet(currentUser ? currentUser.grade : '');
 }
 
@@ -2772,6 +2849,7 @@ function renderChatList() {
       `<span class="del" title="Delete">✕</span>`;
     li.querySelector('.star').addEventListener('click', (e) => {
       e.stopPropagation();
+      if (needsUnlock('Starring chats')) return;
       c.starred = !c.starred;
       saveChats(chats);
       renderChatList();
@@ -2804,6 +2882,9 @@ function renderChatList() {
   rest.forEach(addRow);
 }
 document.getElementById('chatSearch').addEventListener('input', () => renderChatList());
+document.getElementById('chatSearch').addEventListener('focus', (e) => {
+  if (!hasFull()) { e.target.blur(); needsUnlock('Searching chats'); }
+});
 
 function escapeHtml(s) {
   const d = document.createElement('div');
@@ -3247,6 +3328,7 @@ function shrinkTo(src, maxSide, quality) {
 
 async function setPendingPhoto(file) {
   if (!file) return;
+  if (needsUnlock('Homework photos')) return;
   if (busy) { flashPlaceholder('Wait for my answer, then add your photo 🙂'); return; }
   if (file.type && !file.type.startsWith('image/')) {
     flashPlaceholder("That file isn't a picture — try a photo (JPG or PNG).");
@@ -3294,7 +3376,7 @@ function clearPendingPhoto() {
   promptEl.placeholder = 'What are you working on?';
 }
 
-photoBtn.addEventListener('click', () => photoInput.click());
+photoBtn.addEventListener('click', () => { if (!needsUnlock('Homework photos')) photoInput.click(); });
 photoInput.addEventListener('change', () => {
   setPendingPhoto(photoInput.files && photoInput.files[0]);
   photoInput.value = '';  // picking the same photo again still works
@@ -3698,6 +3780,7 @@ async function sendMessage(text, opts = {}) {
       if (autoReadOn() || talkModeOn) lastSpeech = speakMessage(answer, aiDiv.querySelector('.say-btn'));
       if (checkWork) earnBadge('checker');
       if (opts.simple) earnBadge('simple');
+      maybeNudgeForEmail();
       if (!currentUser) refreshGuestStatus(); // keep the "X free questions left" count live
     } else {
       // Nothing was really answered: take the question back out of the saved
