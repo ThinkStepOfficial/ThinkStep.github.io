@@ -1234,7 +1234,7 @@ def check_safety_flag(who, message_text):
 ERRORS_KEEP = 300                  # newest entries kept in errors.json
 ERROR_ALERT_THRESHOLD = 3          # this many errors...
 ERROR_ALERT_WINDOW = 60 * 60       # ...within an hour → email
-ERROR_ALERT_COOLDOWN = 6 * 60 * 60 # max one email per person every 6 hours
+ERROR_ALERT_COOLDOWN = 20 * 60     # max one email per person every 20 minutes
 ERROR_ALERTS_PER_DAY = 20          # never more than this many alert emails a day
 _errors_lock = threading.Lock()
 _error_times = {}       # person key -> [timestamps of recent errors]
@@ -1308,7 +1308,7 @@ def _send_error_alert(who, entries):
         "- Groq 401 = the Groq API key is wrong or expired — check GROQ_API_KEY.\n"
         "- Couldn't connect / timeout = Groq (or the internet) is down for a moment.\n\n"
         "You can see every recent error in the Errors section of your admin page.\n"
-        "(You'll get at most one email per person every 6 hours, and at most "
+        "(You'll get at most one email per person every 20 minutes, and at most "
         f"{ERROR_ALERTS_PER_DAY} of these emails a day.)\n"
     )
     send_email(FEEDBACK_TO_EMAIL, "ThinkStep alert: someone hit 3 errors", body)
