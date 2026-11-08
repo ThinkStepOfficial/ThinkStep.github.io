@@ -2899,11 +2899,11 @@ def signup():
         is_13_or_older = False
     if not is_13_or_older and not _looks_like_email(parent_email):
         return jsonify({"error": "Please enter a parent or guardian's email address."}), 400
-    # Every account needs an email: 13+ students give their own (used for
-    # password resets and, if they want, progress emails); under-13s use
-    # the parent's email above.
-    if is_13_or_older and not _looks_like_email(recovery_email):
-        return jsonify({"error": "Please enter your email address."}), 400
+    # Email is optional for 13+ students — but without one, only the basic
+    # tutor works (see FULL_FEATURES_NOTE). Under-13s always have the
+    # parent's email above, so they get everything once approved.
+    if is_13_or_older and recovery_email and not _looks_like_email(recovery_email):
+        return jsonify({"error": "That email doesn't look right — check it, or leave it empty."}), 400
     if len(recovery_email) > 254 or len(parent_email) > 254:
         return jsonify({"error": "That email address is too long."}), 400
 
@@ -2941,7 +2941,8 @@ def signup():
 
     if is_13_or_older:
         user_record["consent_status"] = "not_required"
-        user_record["recovery_email"] = recovery_email
+        if recovery_email:
+            user_record["recovery_email"] = recovery_email
         users[key] = user_record
         _save_users(users)
         _signup_limiter.record(visitor_id())
@@ -3695,6 +3696,8 @@ def my_progress():
         return jsonify({"error": "Please log in first."}), 401
     if is_under_13_account(user):
         return jsonify({"error": "Your parent or guardian has your progress page."}), 403
+    if not has_full_features(user):
+        return jsonify({"error": FULL_FEATURES_NOTE, "needsEmail": True}), 403
     key = session.get("user_key")
     users = _load_users()
     token = ensure_report_token(users[key])
@@ -3722,11 +3725,33 @@ def set_email():
     return jsonify({"ok": True})
 
 
+# ---- Features that need an account with an email ----
+# Guests and accounts without an email get the basic tutor (asking
+# questions, night mode, easy-read font). Everything else — photos and
+# Check my work, read aloud and talk mode, quizzes, badges and profile
+# emojis, Explain simple, star/search chats, the progress page, and
+# password resets — needs an account with an email (a parent's email
+# counts for under-13s).
+FULL_FEATURES_NOTE = ("📧 That needs an account with an email. Add your email (the \"Add email\" "
+                      "button) to unlock photos, read aloud, quizzes, badges and more!")
+GUEST_FEATURES_NOTE = ("📧 That needs a free ThinkStep account with an email. Make one to unlock "
+                       "photos, read aloud, quizzes, badges and more!")
+
+
+def has_full_features(user):
+    return bool(user) and not needs_email(user)
+
+
+def locked_note(user):
+    return FULL_FEATURES_NOTE if user else GUEST_FEATURES_NOTE
+
+
 def account_payload(user):
     return {
         "name": user["name"],
         "grade": user.get("grade", ""),
         "needsEmail": needs_email(user),
+        "fullFeatures": has_full_features(user),
         "under13": is_under_13_account(user),
         "hasProgressPage": not is_under_13_account(user),
     }
@@ -3741,7 +3766,7 @@ def post_activity():
     """The page reports finished quizzes and newly earned badges, so they
     can go in progress emails. Logged-in accounts only."""
     user = get_current_user()
-    if not user:
+    if not user or not has_full_features(user):
         return jsonify({"ok": False}), 200
     data = _json_body()
     kind = _s(data, "kind")
@@ -3820,8 +3845,8 @@ def _tts_unavailable(reason, status=503):
 @app.route("/api/speak", methods=["POST"])
 def speak():
     user = get_current_user()
-    if not user and session.get("guest_age") != "ok":
-        return _tts_unavailable("not_allowed", 403)
+    if not has_full_features(user):
+        return jsonify({"fallback": False, "reason": "needs_email", "error": locked_note(user)}), 403
     data = _json_body()
     text = " ".join(_s(data, "text").split())
     voice = _s(data, "voice")
@@ -3919,10 +3944,6 @@ def chat():
                 "in the sidebar to keep learning."))
 
     account_key = session.get("user_key") if user else None
-    if user and needs_email(user):
-        return notice_response("Please add your email address first (there's a box for it "
-                               "on the page), then ask me anything! 📧")
-
     # Speed limits, for everyone: stops a script from flooding the site and
     # using up the free AI allowance that every student shares.
     wait = _chat_burst_limiter.hit(f"acct:{account_key}" if user else f"guest:{guest_id}")
@@ -3939,6 +3960,8 @@ def chat():
     photo = data.get("image")
     check_work = data.get("checkWork") is True
     photo_size = None
+    if photo is not None and not has_full_features(user):
+        return with_guest_cookie(notice_response(locked_note(user)))
     if photo is not None:
         if not valid_photo_data_url(photo):
             return with_guest_cookie(notice_response(
@@ -4051,7 +4074,7 @@ def chat():
         )
 
     # "Explain simple" button: re-explain the last reply as simply as possible.
-    if profile.get("simple") is True:
+    if profile.get("simple") is True and has_full_features(user):
         student_info_lines.append(
             "- EXPLAIN SIMPLE: the student pressed the Explain simple button. Explain your last "
             "reply again in the simplest way possible, like you would to a 5-year-old: tiny everyday "
@@ -4061,7 +4084,7 @@ def chat():
 
     # A quiz the student chose to take (the page keeps count of how far
     # along it is, so the tutor knows which question number comes next).
-    quiz = profile.get("quiz")
+    quiz = profile.get("quiz") if has_full_features(user) else None
     if isinstance(quiz, dict):
         total, answered, right = quiz.get("total"), quiz.get("answered"), quiz.get("right")
         if (all(isinstance(v, int) and not isinstance(v, bool) for v in (total, answered, right))
