@@ -1091,6 +1091,7 @@ BACKUP_FILES = [
     "reset_tokens.json",
     "safety_flags.json",
     "activity.json",
+    "errors.json",
 ]
 BACKUP_INTERVAL_SECONDS = 6 * 60 * 60  # every 6 hours
 BACKUP_KEEP = 28  # ~1 week of history at the interval above
@@ -1220,6 +1221,144 @@ def check_safety_flag(who, message_text):
 
     threading.Thread(target=_alert, daemon=True).start()
     return True
+
+
+# ============================================================
+# Error alerts — keeps a short log of errors students actually SAW
+# (Groq down, bad API key, a crash...) and emails the operator when the
+# same person hits 3 errors within an hour, so a broken site doesn't go
+# unnoticed. The log never stores what the student asked — just who,
+# when, what kind of error, and a short description. It shows up in the
+# "Errors" section of the admin page.
+# ============================================================
+ERRORS_KEEP = 300                  # newest entries kept in errors.json
+ERROR_ALERT_THRESHOLD = 3          # this many errors...
+ERROR_ALERT_WINDOW = 60 * 60       # ...within an hour → email
+ERROR_ALERT_COOLDOWN = 6 * 60 * 60 # max one email per person every 6 hours
+ERROR_ALERTS_PER_DAY = 20          # never more than this many alert emails a day
+_errors_lock = threading.Lock()
+_error_times = {}       # person key -> [timestamps of recent errors]
+_error_recent = {}      # person key -> [recent log entries, for the email]
+_error_alerted = {}     # person key -> when we last emailed about them
+_error_alerts_sent = [] # timestamps of every alert email (for the daily cap)
+
+# Plain-English names for each kind of error, used in the email.
+ERROR_KIND_TEXT = {
+    "no api key": "ThinkStep has no Groq API key, so the tutor couldn't answer",
+    "photo unreadable": "a homework photo couldn't be read",
+    "groq unreachable": "couldn't connect to Groq (the AI service)",
+    "groq timeout": "Groq took too long to answer",
+    "groq 401": "Groq said the API key is invalid or expired",
+    "groq 429": "Groq's free usage limit was hit",
+    "groq error": "Groq sent back an error",
+    "tutor crash": "something broke while the tutor was answering",
+    "server crash": "the server crashed on a request",
+    "network": "the page couldn't reach the server (their internet or the site was down)",
+    "js": "a bug in the page's code (JavaScript error)",
+    "chat": "the chat request came back with an error",
+}
+
+
+def _dispatch(fn):
+    """Runs `fn` on a background thread so sending an email never slows a
+    student down. (Tests swap this out to run things right away.)"""
+    threading.Thread(target=fn, daemon=True).start()
+
+
+def _load_errors():
+    data = STORE.read("errors.json", []) or []
+    return data if isinstance(data, list) else []
+
+
+def _current_person():
+    """(person key, who label) for whoever made the current request."""
+    user = get_current_user()
+    if user:
+        return f"acct:{session.get('user_key')}", user.get("name") or "an account"
+    guest_id = request.cookies.get(GUEST_COOKIE_NAME)
+    if guest_id:
+        return f"guest:{guest_id}", f"guest {guest_id}"
+    return visitor_id(), "a visitor"
+
+
+def _describe_person(person_key, who_label):
+    """'Name (grade 5)' for accounts, 'a guest' otherwise."""
+    if person_key.startswith("acct:"):
+        try:
+            u = _load_users().get(person_key[len("acct:"):]) or {}
+        except Exception:
+            u = {}
+        name = u.get("name") or who_label
+        grade = u.get("grade")
+        return f"{name} (grade {grade})" if grade else name
+    return "a guest"
+
+
+def _send_error_alert(who, entries):
+    lines = []
+    for e in entries:
+        nice = ERROR_KIND_TEXT.get(e["kind"], e["kind"])
+        lines.append(f"- {e['time']}  {nice}" + (f" — {e['detail']}" if e.get("detail") else ""))
+    body = (
+        f"Someone on ThinkStep hit {len(entries)} errors within an hour.\n\n"
+        f"Who: {who}\n\n"
+        f"What happened:\n" + "\n".join(lines) + "\n\n"
+        "Common causes:\n"
+        "- Groq 429 = the free Groq usage limit was hit (usually fixes itself after a bit).\n"
+        "- Groq 401 = the Groq API key is wrong or expired — check GROQ_API_KEY.\n"
+        "- Couldn't connect / timeout = Groq (or the internet) is down for a moment.\n\n"
+        "You can see every recent error in the Errors section of your admin page.\n"
+        "(You'll get at most one email per person every 6 hours, and at most "
+        f"{ERROR_ALERTS_PER_DAY} of these emails a day.)\n"
+    )
+    send_email(FEEDBACK_TO_EMAIL, "ThinkStep alert: someone hit 3 errors", body)
+
+
+def note_error(person_key, who_label, kind, detail=""):
+    """Records an error a student actually saw, and emails the operator if
+    this person has now hit 3 errors within an hour. Never raises — a
+    broken log must never make things worse for the student.
+    NEVER pass the student's question text as `detail`."""
+    try:
+        now = datetime.now(timezone.utc)
+        ts = now.timestamp()
+        entry = {
+            "time": now.isoformat(),
+            "who": (str(who_label or "unknown"))[:80],
+            "kind": str(kind)[:40],
+            "detail": (str(detail or "")).strip()[:200],
+        }
+        person_key = str(person_key or "unknown")
+        send_now = None
+        with _errors_lock:
+            log = _load_errors()
+            log.append(entry)
+            STORE.write("errors.json", log[-ERRORS_KEEP:])
+
+            cutoff = ts - ERROR_ALERT_WINDOW
+            times = [t for t in _error_times.get(person_key, []) if t > cutoff] + [ts]
+            recent = (_error_recent.get(person_key, []) + [entry])[-len(times):]
+            _error_times[person_key] = times
+            _error_recent[person_key] = recent
+            if len(_error_times) > 5000:  # keep memory bounded: drop quiet people
+                for k in [k for k, v in _error_times.items() if not any(t > cutoff for t in v)]:
+                    _error_times.pop(k, None)
+                    _error_recent.pop(k, None)
+
+            if len(times) >= ERROR_ALERT_THRESHOLD:
+                last = _error_alerted.get(person_key)
+                _error_alerts_sent[:] = [t for t in _error_alerts_sent if t > ts - 24 * 3600]
+                if (last is None or ts - last >= ERROR_ALERT_COOLDOWN) \
+                        and len(_error_alerts_sent) < ERROR_ALERTS_PER_DAY:
+                    _error_alerted[person_key] = ts
+                    _error_alerts_sent.append(ts)
+                    send_now = list(recent)
+        print(f"[ThinkStep] ERROR seen by {entry['who']}: {entry['kind']} {entry['detail'][:120]!r}")
+        if send_now:
+            who = _describe_person(person_key, who_label)
+            _dispatch(lambda: _send_error_alert(who, send_now))
+    except Exception as e:
+        print(f"[ThinkStep] Couldn't record an error: {e}")
 
 
 SYSTEM_PROMPT = """You are ThinkStep, a warm, patient AI tutor for kids.
@@ -2193,6 +2332,7 @@ def admin_stats():
         "totalFeedback": total_feedback,
         "avgRating": avg_rating,
         "totalSafetyFlags": len(flags),
+        "totalErrors24h": _error_counts(_load_errors())[1],
         "warnings": setup_warnings(),
     })
 
@@ -2260,6 +2400,72 @@ def admin_safety_flags():
     # Most recent first, capped so this stays a quick glance rather than a
     # full log dump.
     return jsonify({"flags": list(reversed(flags))[:50]})
+
+
+def _error_counts(entries):
+    """How many errors in the last hour and the last 24 hours."""
+    now = datetime.now(timezone.utc)
+    hour = day = 0
+    for e in entries:
+        try:
+            when = datetime.fromisoformat(e.get("time", ""))
+        except (TypeError, ValueError):
+            continue
+        age = (now - when).total_seconds()
+        if age <= 24 * 3600:
+            day += 1
+            if age <= 3600:
+                hour += 1
+    return hour, day
+
+
+@app.route("/api/admin/errors")
+def admin_errors():
+    """Errors students actually saw, newest first (for the Errors section)."""
+    if not require_admin():
+        return jsonify({"error": "Not authorized."}), 401
+    entries = _load_errors()
+    hour, day = _error_counts(entries)
+    return jsonify({"errors": list(reversed(entries))[:100],
+                    "lastHour": hour, "last24h": day})
+
+
+# Errors the page saw that never reached the server (internet dropped,
+# a bug in the page's code, a bad reply). Rate-limited so one broken
+# browser can't flood the log.
+CLIENT_ERROR_KINDS = ("network", "js", "chat")
+_client_error_limiter = SlidingWindowLimiter(20, 3600)
+
+
+@app.route("/api/client-error", methods=["POST"])
+def client_error():
+    data = _json_body()
+    kind = _s(data, "kind").strip()
+    if kind not in CLIENT_ERROR_KINDS:
+        return jsonify({"error": "Unknown error kind."}), 400
+    detail = _s(data, "detail").strip()[:200]
+    if _client_error_limiter.hit(visitor_id()):
+        return jsonify({"error": "Too many error reports."}), 429
+    person, who = _current_person()
+    note_error(person, who, kind, detail)
+    return jsonify({"ok": True})
+
+
+@app.errorhandler(500)
+def server_error(e):
+    """A crash anywhere: count it as an error for whoever hit it, and give
+    them a friendly message instead of a scary error page."""
+    try:
+        person, who = _current_person()
+        note_error(person, who, "server crash", f"{request.method} {request.path}")
+    except Exception:
+        pass
+    try:
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Something went wrong on our side."}), 500
+    except Exception:
+        pass
+    return "Something went wrong on our side.", 500
 
 
 @app.route("/api/heartbeat", methods=["POST"])
@@ -3634,8 +3840,13 @@ def chat():
         q = queue.Queue()
         result = {"succeeded": False}
 
+        # Who to blame in the error log / alert email (never their question).
+        error_person = (f"acct:{account_key}" if user else
+                        f"guest:{guest_id}" if guest_id else visitor)
+
         def worker():
             if not groq_api_key:
+                note_error(error_person, who_label, "no api key", "No Groq API key is set.")
                 q.put(
                     NOTICE + "\n\n[ThinkStep isn't connected to an AI provider yet. "
                     "Whoever runs this app needs to add a Groq API key — "
@@ -3649,6 +3860,8 @@ def chat():
             if photo:
                 reading = read_homework_photo(photo, last_user_msg, groq_api_key, photo_size, check_work)
                 if reading is None:
+                    note_error(error_person, who_label, "photo unreadable",
+                               "The homework photo couldn't be read.")
                     q.put(NOTICE + "I couldn't read that photo right now. Try a clearer, "
                           "brighter picture — or type the problem and I'll help! 📸")
                     q.put(SENTINEL)
@@ -3762,11 +3975,17 @@ def chat():
                     result["model_used"] = attempt_model
                     break
             except requests.exceptions.ConnectionError:
+                note_error(error_person, who_label, "groq unreachable", "Couldn't connect to Groq.")
                 q.put(NOTICE + "\n\n[Couldn't reach Groq. Check your internet connection and try again.]")
             except requests.exceptions.ReadTimeout:
+                note_error(error_person, who_label, "groq timeout", "Groq took too long to respond.")
                 q.put(NOTICE + "\n\n[Groq took too long to respond. Please try asking again.]")
             except requests.exceptions.HTTPError as e:
                 status = e.response.status_code if e.response is not None else None
+                if status in (401, 429):
+                    note_error(error_person, who_label, f"groq {status}", f"Groq said {status}.")
+                else:
+                    note_error(error_person, who_label, "groq error", str(e))
                 if status == 401:
                     q.put(NOTICE + "\n\n[ThinkStep's Groq API key looks invalid or expired — whoever runs this app needs to check groq_config.json.]")
                 elif status == 429:
@@ -3774,6 +3993,7 @@ def chat():
                 else:
                     q.put(NOTICE + f"\n\n[Error talking to Groq: {e}]")
             except Exception as e:
+                note_error(error_person, who_label, "tutor crash", f"{type(e).__name__}: {e}")
                 q.put(NOTICE + f"\n\n[Error talking to Groq: {e}]")
             finally:
                 q.put(SENTINEL)
