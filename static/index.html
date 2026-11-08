@@ -1517,6 +1517,37 @@ const sendBtn = document.getElementById('send');
 const CHAT_MODEL = 'openai/gpt-oss-120b';
 
 /* =====================================================================
+   Error reporting — tells the server about errors this page saw that
+   never reached it (internet dropped, a bug in the page, a bad reply),
+   so they show up on the admin page. Never sends what the student typed.
+   Fire-and-forget: it can never throw or bother the student.
+   ===================================================================== */
+const reportedErrors = new Set();
+function reportError(kind, detail) {
+  try {
+    const msg = String(detail || '').slice(0, 200);
+    const key = kind + '|' + msg;
+    // Same message twice, or lots of errors on one page = only send a few.
+    if (reportedErrors.has(key) || reportedErrors.size >= 5) return;
+    reportedErrors.add(key);
+    fetch('/api/client-error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, detail: msg }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) { /* never let error reporting cause an error */ }
+}
+window.addEventListener('error', (e) => {
+  const where = e.filename ? ` (${String(e.filename).split('/').pop()}:${e.lineno || 0})` : '';
+  reportError('js', String(e.message || 'Unknown error').slice(0, 150) + where);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason;
+  reportError('js', 'Unhandled: ' + String((r && r.message) || r || 'unknown').slice(0, 150));
+});
+
+/* =====================================================================
    Night mode — a soft navy theme. Remembers the choice on this device.
    ===================================================================== */
 const themeToggle = document.getElementById('themeToggle');
@@ -3595,6 +3626,10 @@ async function sendMessage(text, opts = {}) {
     const contentType = res.headers.get('content-type') || '';
     if (!res.ok || !contentType.includes('text/plain')) {
       clearTimeout(slowNoteTimer);
+      // 500 = the server already counted it; 429 = a speed limit, not an error.
+      if (res.status !== 500 && res.status !== 429) {
+        reportError('chat', `Chat request failed (status ${res.status}, ${contentType.split(';')[0] || 'no type'})`);
+      }
       aiDiv.textContent = res.status === 524
         ? "The connection timed out before ThinkStep could answer. Please try again in a bit."
         : res.status === 413
@@ -3678,6 +3713,7 @@ async function sendMessage(text, opts = {}) {
   } catch (err) {
     clearTimeout(slowNoteTimer);
     aiDiv.textContent = 'Something went wrong reaching ThinkStep. Is the server running?';
+    reportError('network', `Couldn't reach the server: ${String((err && err.message) || err).slice(0, 120)}`);
     checkConnection();
   } finally {
     if (photoWrap) photoWrap.classList.remove('scanning');

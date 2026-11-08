@@ -133,11 +133,13 @@
 
   .stat-row {
     display: flex;
+    flex-wrap: wrap;
     gap: 14px;
     margin-bottom: 22px;
   }
   .stat-box {
     flex: 1;
+    min-width: 110px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 16px;
@@ -197,6 +199,12 @@
   .flag-row:last-child { border-bottom: none; }
   .flag-row .flag-who { font-weight: 700; color: var(--text); }
   .flag-row .flag-time { color: var(--muted); font-size: 11.5px; margin-left: 8px; }
+  .flag-row .error-kind {
+    display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px;
+    background: #fff0ef; border: 1px solid #f3c6c1; color: #a5321f;
+    font-size: 11px; font-weight: 700;
+  }
+  .flag-row .error-detail { margin-top: 4px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
   .flag-row .flag-msg {
     margin-top: 4px;
     color: #a5321f;
@@ -267,6 +275,10 @@
         <div class="num" id="totalSafetyFlags">–</div>
         <div class="label">safety flags</div>
       </div>
+      <div class="stat-box" id="errorsStatBox">
+        <div class="num" id="totalErrors24h">–</div>
+        <div class="label">errors (last 24h)</div>
+      </div>
     </div>
 
     <div class="list-card" style="margin-top:16px;">
@@ -277,6 +289,11 @@
     <div class="list-card" style="margin-top:16px;">
       <h2>Recent safety flags</h2>
       <div id="safetyFlagsList"><div class="empty-note">Loading…</div></div>
+    </div>
+
+    <div class="list-card" style="margin-top:16px;">
+      <h2>Recent errors <span id="errorsHourNote" style="font-weight:400;color:var(--muted);font-size:12.5px;"></span></h2>
+      <div id="errorsList"><div class="empty-note">Loading…</div></div>
     </div>
 
     <div class="refresh-note" id="refreshNote">Updates live, every 2 seconds.</div>
@@ -301,6 +318,10 @@ const avgRatingEl = document.getElementById('avgRating');
 const totalSafetyFlagsEl = document.getElementById('totalSafetyFlags');
 const safetyStatBox = document.getElementById('safetyStatBox');
 const safetyFlagsListEl = document.getElementById('safetyFlagsList');
+const totalErrors24hEl = document.getElementById('totalErrors24h');
+const errorsStatBox = document.getElementById('errorsStatBox');
+const errorsListEl = document.getElementById('errorsList');
+const errorsHourNoteEl = document.getElementById('errorsHourNote');
 const allAccountsListEl = document.getElementById('allAccountsList');
 
 function timeAgo(iso) {
@@ -342,7 +363,7 @@ async function fetchAll() {
   if (fetching || document.hidden || dashboard.style.display === 'none') return;
   fetching = true;
   try {
-    await Promise.all([fetchOnline(), fetchStats(), fetchAllAccounts(), fetchSafetyFlags()]);
+    await Promise.all([fetchOnline(), fetchStats(), fetchAllAccounts(), fetchSafetyFlags(), fetchErrors()]);
     lastUpdated = Date.now();
     showUpdated();
   } finally {
@@ -427,6 +448,38 @@ async function fetchSafetyFlags() {
     `).join('');
   } catch (err) {
     safetyFlagsListEl.innerHTML = `<div class="empty-note">Couldn't reach the server to load safety flags. Retrying…</div>`;
+  }
+}
+
+// Errors students actually saw (Groq down, bad API key, crashes, the
+// page losing internet...). 3 from one person in an hour also emails you.
+async function fetchErrors() {
+  try {
+    const res = await fetch('/api/admin/errors', { cache: 'no-store' });
+    if (res.status === 401) { showLogin(); return; }
+    if (!res.ok) {
+      errorsListEl.innerHTML = `<div class="empty-note">Couldn't load errors (server said ${res.status}). Try restarting the Flask server.</div>`;
+      return;
+    }
+    const data = await res.json();
+    const day = data.last24h || 0;
+    totalErrors24hEl.textContent = day;
+    errorsStatBox.classList.toggle('alert', day > 0);
+    errorsHourNoteEl.textContent = `(${data.lastHour || 0} in the last hour)`;
+    if (!data.errors || data.errors.length === 0) {
+      errorsListEl.innerHTML = '<div class="empty-note">No errors — everything is working. 🎉</div>';
+      return;
+    }
+    errorsListEl.innerHTML = data.errors.map(e => `
+      <div class="flag-row">
+        <span class="flag-who">${escapeHtml(e.who)}</span>
+        <span class="flag-time">${escapeHtml(new Date(e.time).toLocaleString())}</span>
+        <span class="error-kind">${escapeHtml(e.kind)}</span>
+        ${e.detail ? `<div class="error-detail">${escapeHtml(e.detail)}</div>` : ''}
+      </div>
+    `).join('');
+  } catch (err) {
+    errorsListEl.innerHTML = `<div class="empty-note">Couldn't reach the server to load errors. Retrying…</div>`;
   }
 }
 
