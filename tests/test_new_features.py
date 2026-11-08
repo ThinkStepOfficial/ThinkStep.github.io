@@ -63,6 +63,7 @@ def test_tutor_is_told_to_keep_replies_short_and_knows_the_quiz_tags(app_module)
 
 
 def test_running_quiz_tells_the_tutor_which_question_is_next(app_module, client, monkeypatch):
+    make_account(client, "Full Kid", "9", "password1")  # photos/voices need an email account
     seen = _fake_tutor(app_module, monkeypatch)
     client.post("/api/chat", json={"messages": [{"role": "user", "content": "12"}],
                                    "profile": {"quiz": {"total": 5, "answered": 2, "right": 1}}}).get_data()
@@ -86,9 +87,11 @@ def test_odd_quiz_info_is_ignored(app_module, client, monkeypatch, quiz):
 
 # ---------- every account needs an email ----------
 
-def test_13_plus_signup_needs_an_email(client):
+def test_13_plus_signup_without_email_works_but_is_basic(client):
     res = make_account(client, "No Email Kid", "9", "password1", recovery_email="")
-    assert res.status_code == 400 and "email" in res.get_json()["error"].lower()
+    assert res.status_code == 200
+    me = res.get_json()
+    assert me["needsEmail"] is True and me["fullFeatures"] is False
     res = make_account(client, "Bad Email Kid", "9", "password1", recovery_email="nope")
     assert res.status_code == 400
 
@@ -102,7 +105,7 @@ def test_old_account_without_email_is_asked_for_one(app_module, client, monkeypa
     assert me["needsEmail"] is True
     _fake_tutor(app_module, monkeypatch)
     out = client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]}).get_data(as_text=True)
-    assert out.startswith(app_module.NOTICE) and "email" in out
+    assert not out.startswith(app_module.NOTICE)  # basic questions still work without an email
     assert client.post("/api/set-email", json={"email": "bad"}).status_code == 400
     assert client.post("/api/set-email", json={"email": "old@example.com"}).status_code == 200
     assert client.get("/api/me").get_json()["needsEmail"] is False
@@ -176,6 +179,7 @@ def test_kids_under_13_get_no_progress_link_their_parent_has_it(app_module, clie
 # ---------- step checker + explain simple ----------
 
 def test_check_my_work_finds_the_first_wrong_step(app_module, client, monkeypatch):
+    make_account(client, "Full Kid", "9", "password1")  # photos/voices need an email account
     reading = {"appropriate": True, "homework": True, "notes": "2/3 - 1/6",
                "problems": [{"label": "Problem 3", "box": [70, 160, 910, 330]}], "focus": 0,
                "steps": [{"text": "2/3 = 4/6", "box": [100, 200, 600, 240]},
@@ -210,6 +214,7 @@ def test_check_my_work_finds_the_first_wrong_step(app_module, client, monkeypatc
 
 
 def test_explain_simple_tells_the_tutor_to_simplify(app_module, client, monkeypatch):
+    make_account(client, "Full Kid", "9", "password1")  # photos/voices need an email account
     seen = _fake_tutor(app_module, monkeypatch)
     client.post("/api/chat", json={"messages": [{"role": "user", "content": "Explain that more simply"}],
                                    "profile": {"simple": True}}).get_data()
@@ -248,6 +253,7 @@ def _fake_voice(app_module, monkeypatch, status=200, headers=None, text=""):
 
 
 def test_speak_returns_audio_and_remembers_it(app_module, client, monkeypatch):
+    make_account(client, "Full Kid", "9", "password1")  # photos/voices need an email account
     calls = _fake_voice(app_module, monkeypatch)
     for _ in range(3):
         res = client.post("/api/speak", json={"text": "Nice work! What comes next?", "voice": "hannah"})
@@ -259,17 +265,22 @@ def test_speak_returns_audio_and_remembers_it(app_module, client, monkeypatch):
 @pytest.mark.parametrize("body", [{"text": "hi", "voice": "robot"}, {"text": "", "voice": "troy"},
                                   {"text": "x" * 201, "voice": "troy"}, {"text": 5, "voice": "troy"}])
 def test_speak_rejects_bad_requests(app_module, client, monkeypatch, body):
+    make_account(client, "Full Kid", "9", "password1")  # photos/voices need an email account
     _fake_voice(app_module, monkeypatch)
     assert client.post("/api/speak", json=body).status_code == 400
 
 
-def test_speak_needs_the_age_check_first(app_module, unverified_client, monkeypatch):
+def test_speak_needs_an_email_account(app_module, client, monkeypatch):
     _fake_voice(app_module, monkeypatch)
-    res = unverified_client.post("/api/speak", json={"text": "hi", "voice": "troy"})
-    assert res.status_code == 403 and res.get_json()["fallback"] is True
+    res = client.post("/api/speak", json={"text": "hi", "voice": "troy"})  # guest
+    assert res.status_code == 403 and res.get_json()["reason"] == "needs_email"
+    make_account(client, "Plain Kid", "9", "password1", recovery_email="")
+    res = client.post("/api/speak", json={"text": "hi", "voice": "troy"})
+    assert res.status_code == 403 and res.get_json()["fallback"] is False
 
 
 def test_when_groq_says_enough_the_page_is_told_to_use_its_own_voice(app_module, client, monkeypatch):
+    make_account(client, "Full Kid", "9", "password1")  # photos/voices need an email account
     calls = _fake_voice(app_module, monkeypatch, status=429,
                         headers={"x-ratelimit-reset-requests": "2h3m"})
     res = client.post("/api/speak", json={"text": "one", "voice": "troy"})
@@ -280,6 +291,7 @@ def test_when_groq_says_enough_the_page_is_told_to_use_its_own_voice(app_module,
 
 
 def test_voice_terms_problem_shows_up_for_the_admin(app_module, client, monkeypatch):
+    make_account(client, "Full Kid", "9", "password1")  # photos/voices need an email account
     _fake_voice(app_module, monkeypatch, status=400,
                 text='{"error":{"message":"The model requires terms acceptance"}}')
     res = client.post("/api/speak", json={"text": "hi", "voice": "troy"})
