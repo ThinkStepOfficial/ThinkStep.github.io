@@ -296,6 +296,11 @@
       <div id="errorsList"><div class="empty-note">Loading…</div></div>
     </div>
 
+    <div class="list-card" style="margin-top:16px;">
+      <h2>AI providers</h2>
+      <div id="providersList"><div class="empty-note">Loading…</div></div>
+    </div>
+
     <div class="refresh-note" id="refreshNote">Updates live, every 2 seconds.</div>
   </div>
 </main>
@@ -466,6 +471,26 @@ async function fetchErrors() {
     totalErrors24hEl.textContent = day;
     errorsStatBox.classList.toggle('alert', day > 0);
     errorsHourNoteEl.textContent = `(${data.lastHour || 0} in the last hour)`;
+    const pv = data.providers;
+    const pvEl = document.getElementById('providersList');
+    if (pv && pvEl && pv.providers) {
+      const ago = s => s < 60 ? `${s}s ago` : `${Math.floor(s / 60)} min ago`;
+      pvEl.innerHTML = pv.providers.map(p => {
+        const state = !p.ready ? 'no key set' : p.resting ? 'resting after an error' : 'ready';
+        const nowList = p.now.length
+          ? p.now.map(w => `<span class="flag-who" style="margin-right:8px;">🟢 ${escapeHtml(w)}</span>`).join('')
+          : '<span style="color:var(--muted);">nobody right now</span>';
+        const recent = p.recent.length
+          ? p.recent.slice(0, 12).map(r => `${escapeHtml(r.who)} (${ago(r.secondsAgo)})`).join(', ')
+          : 'nobody in the last 15 min';
+        return `<div class="flag-row" style="display:block;">
+          <div><span class="flag-who">${escapeHtml(p.name)}</span>
+            <span class="flag-time">${p.now.length}/${p.limit} now · ${state} · ${p.answers} answers since restart</span></div>
+          <div style="margin-top:4px;">${nowList}</div>
+          <div style="margin-top:2px;font-size:12.5px;color:var(--muted);">Recently: ${recent}</div>
+        </div>`;
+      }).join('');
+    }
     if (!data.errors || data.errors.length === 0) {
       errorsListEl.innerHTML = '<div class="empty-note">No errors — everything is working. 🎉</div>';
       return;
