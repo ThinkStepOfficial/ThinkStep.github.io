@@ -1,6 +1,6 @@
 """Error alerts: errors students actually see are logged (never their
 question text), shown on the admin page, and 3 errors from one person in
-an hour emails the operator — at most once per person every 6 hours and at
+an hour emails the operator — at most once per person every 20 minutes and at
 most 20 emails a day."""
 import pytest
 import requests
@@ -74,7 +74,7 @@ def test_three_errors_email_the_operator_once(app_module, sent):
     assert len(alerts) == 1
     to, subject, body = alerts[0]
     assert to.lower() == "thinkstepv1.0@gmail.com"
-    assert "a guest" in body and "API key" in body and "6 hours" in body
+    assert "a guest" in body and "API key" in body and "20 minutes" in body
 
 
 def test_account_name_and_grade_are_in_the_email(app_module, client, sent, monkeypatch):
