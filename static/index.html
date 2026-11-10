@@ -1401,7 +1401,7 @@
   <div class="account-modal">
     <button type="button" class="close-btn" id="accountModalClose">✕</button>
     <h2 id="accountModalTitle">Sign Up</h2>
-    <div class="sub" id="accountModalSub">Just a name, grade, and password — free, and takes a minute.</div>
+    <div class="sub" id="accountModalSub">Free, and takes a minute. Add an email to unlock every feature.</div>
     <form id="accountForm">
       <label for="accName">Your name</label>
       <input id="accName" type="text" autocomplete="name" maxlength="60" required />
@@ -1425,7 +1425,7 @@
         <div class="field-hint">We'll email them to approve this account before it can be used — that's required by law for kids under 13.</div>
       </div>
       <div id="recoveryEmailWrap" style="display:none;">
-        <label for="accRecoveryEmail">Your email</label>
+        <label for="accRecoveryEmail">Your email (optional, but unlocks everything)</label>
         <input id="accRecoveryEmail" type="email" autocomplete="email" maxlength="254" />
         <div class="field-hint">Optional — but without an email you only get the basic tutor. An email unlocks photos, read aloud, quizzes, badges, saving and searching chats, your progress page, and password resets.</div>
       </div>
@@ -1949,13 +1949,15 @@ function pickBuiltinVoice(gender) {
 }
 function speakBuiltin(text, token) {
   return new Promise(resolve => {
-    if (token !== speechToken || !window.speechSynthesis) return resolve();
-    const u = new SpeechSynthesisUtterance(text);
-    const v = pickBuiltinVoice(voiceGender());
-    if (v) u.voice = v;
-    u.rate = 0.98;
-    u.onend = u.onerror = () => resolve();
-    speechSynthesis.speak(u);
+    if (token !== speechToken || !window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== 'function') return resolve();
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      const v = pickBuiltinVoice(voiceGender());
+      if (v) u.voice = v;
+      u.rate = 0.98;
+      u.onend = u.onerror = () => resolve();
+      speechSynthesis.speak(u);
+    } catch { resolve(); }  // some browsers only half-support built-in voices
   });
 }
 
@@ -2061,12 +2063,19 @@ function updateEmailUI() {
   const readCard = document.getElementById('voiceSample');
   if (readCard) readCard.closest('.tool-card').classList.toggle('feature-locked', !hasFull());
   document.getElementById('chatSearch').placeholder = hasFull() ? '🔍 Search your chats' : '🔒 Search needs an email';
+  autoReadBox.checked = hasFull() && autoReadOn();
   renderBadges();
+  // a quiz can't keep running without an email (the tutor stops counting it)
+  try {
+    if (!hasFull() && getActive().quiz) { delete getActive().quiz; saveChats(chats); }
+    renderQuizPill();
+  } catch {}
 }
 document.getElementById('addEmailBtn').addEventListener('click', () => openEmailModal('button'));
 document.getElementById('emailClose').addEventListener('click', closeEmailModal);
 document.getElementById('emailLater').addEventListener('click', closeEmailModal);
 emailOverlay.addEventListener('click', (e) => { if (e.target === emailOverlay) closeEmailModal(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && emailOverlay.classList.contains('open')) closeEmailModal(); });
 // every 5 questions, an account without an email is reminded once
 function maybeNudgeForEmail() {
   if (!currentUser || !currentUser.needsEmail) return;
@@ -2198,7 +2207,7 @@ let lastTierSeen = null;
 function checkEmojiUnlocks() {
   const done = questionsDone();
   const tier = EMOJI_TIERS.filter(t => done >= t.at).length;
-  if (lastTierSeen !== null && tier > lastTierSeen) showToast('🎉 New profile emojis unlocked! Tap your picture to see.');
+  if (lastTierSeen !== null && tier > lastTierSeen && hasFull()) showToast('🎉 New profile emojis unlocked! Tap your picture to see.');
   lastTierSeen = tier;
 }
 
@@ -2427,7 +2436,7 @@ function syncAgeGateToGrade() {
   parentEmailWrap.style.display = accIs13.checked ? 'none' : 'block';
   accParentEmail.required = !accIs13.checked;
   recoveryEmailWrap.style.display = accIs13.checked ? 'block' : 'none';
-  accRecoveryEmail.required = accIs13.checked;
+  accRecoveryEmail.required = false;  // optional for 13+ (it unlocks every feature)
 }
 
 accGrade.addEventListener('change', syncAgeGateToGrade);
@@ -2436,7 +2445,7 @@ accIs13.addEventListener('change', () => {
   parentEmailWrap.style.display = under13 ? 'block' : 'none';
   accParentEmail.required = under13;
   recoveryEmailWrap.style.display = under13 ? 'none' : 'block';
-  accRecoveryEmail.required = !under13;
+  accRecoveryEmail.required = false;
 });
 
 let accountModalMode = 'signup'; // 'signup' | 'login'
@@ -2454,7 +2463,7 @@ function openAccountModal(mode) {
   is13Hint.style.display = 'none';
   if (mode === 'signup') {
     accountModalTitle.textContent = 'Sign Up';
-    accountModalSub.textContent = 'Just a name, grade, and password — free, and takes a minute.';
+    accountModalSub.textContent = 'Free, and takes a minute. Add an email to unlock every feature.';
     gradeFieldWrap.style.display = 'block';
     accGrade.required = true;
     ageFieldWrap.style.display = 'block';
@@ -2463,6 +2472,7 @@ function openAccountModal(mode) {
     switchModePrompt.textContent = 'Already have an account?';
     switchModeBtn.textContent = 'Log In';
     forgotPasswordRow.style.display = 'none';
+    syncAgeGateToGrade();  // the right email box shows straight away
   } else {
     accountModalTitle.textContent = 'Log In';
     accountModalSub.textContent = 'Welcome back!';
@@ -3777,7 +3787,7 @@ async function sendMessage(text, opts = {}) {
       bumpProblemsCount();
       if (photo) earnBadge('photo');
       attachSayButton(aiDiv, answer);
-      if (autoReadOn() || talkModeOn) lastSpeech = speakMessage(answer, aiDiv.querySelector('.say-btn'));
+      if (hasFull() && (autoReadOn() || talkModeOn)) lastSpeech = speakMessage(answer, aiDiv.querySelector('.say-btn'));
       if (checkWork) earnBadge('checker');
       if (opts.simple) earnBadge('simple');
       maybeNudgeForEmail();
