@@ -98,3 +98,9 @@ def test_terms_and_privacy_explain_it(client):
     terms = client.get("/terms").get_data(as_text=True)
     assert "Features that need an email" in terms and "can't be recovered" in terms
     assert "only gets the basic tutor" in client.get("/privacy").get_data(as_text=True)
+
+
+def test_an_existing_email_cant_be_swapped(client):
+    make_account(client, "Mail Kid", "9", "password1")
+    r = client.post("/api/set-email", json={"email": "thief@example.com"})
+    assert r.status_code == 409
