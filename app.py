@@ -467,6 +467,8 @@ only send a student to a lower-ranked AI when the better ones are clearly
 busier, so the load stays reasonably even without giving up quality. If two
 AIs are about as busy, pick the better one. Students who ask a lot can go to
 a lower-ranked AI first so the best one stays free for everyone else.
+Mistral also checks students' profile pictures; that work is already included
+in its "answering_now" count, so treat it as real load.
 Only pick an AI from the list.
 Reply with JSON only: {"send_to": "<AI name>", "reason": "a few words"}"""
 _balance = {"asks": {}, "log": [], "cf_checks": 0, "cf_rest_until": 0.0}
@@ -3871,6 +3873,134 @@ def _tts_cache_put(k, audio):
 
 def _tts_unavailable(reason, status=503):
     return jsonify({"fallback": True, "reason": reason}), status
+
+
+# ============================================================
+# Profile picture check
+# ------------------------------------------------------------
+# A picture a student uploads as their profile picture is checked ONCE by
+# an AI before it's used: nothing inappropriate, no real person's face or
+# personal info (kids' safety), and not just an emoji — profile emojis are
+# earned by leveling up, so uploading a picture of a locked emoji doesn't
+# count. Mistral checks it first (Groq's vision models if Mistral is busy).
+# The picture is never saved on the server; it stays on the student's device.
+# While Mistral checks, it counts as busy, so the Cloudflare balancer sees
+# that and sends tutoring to other AIs.
+# ============================================================
+AVATAR_MAX_DATA_URL_CHARS = 200_000     # the page shrinks pictures to 160x160
+AVATAR_CHECKS_PER_HOUR = 10
+_avatar_limiter = SlidingWindowLimiter(AVATAR_CHECKS_PER_HOUR, 3600)
+AVATAR_CHECK_PROMPT = """You check profile pictures for a homework app used by KIDS (ages 6-18).
+Look at the picture and decide if it's OK to use. Reply with JSON only:
+{"ok": 0 or 1, "reason": "one short, friendly sentence for a kid"}
+
+NOT OK (ok = 0):
+- Anything inappropriate for kids: nudity or underwear, violence, blood or
+  gore, weapons, drugs, alcohol, smoking, scary or disturbing images, rude
+  gestures, bad words, hate symbols, or anything mean.
+- A photo of a real person's face (keep kids safe online — no selfies or
+  photos of people), or personal info like names, addresses, phone numbers
+  or school names.
+- A picture that is mainly an EMOJI or emoji-style icon (like a crown, gem,
+  trophy, unicorn, dragon, robot or smiley emoji). Profile emojis are earned
+  by leveling up in the app, so emoji pictures aren't allowed.
+- A screenshot of the app, or text-only images.
+
+OK (ok = 1): drawings and doodles the student made, pets and animals,
+nature, toys, objects, sports gear, cartoon-style art that is not an emoji,
+patterns, favourite things.
+If you're unsure whether it's safe for kids, say NOT OK."""
+
+
+def _parse_avatar_verdict(text):
+    data = _extract_json_object(text or "")
+    if not isinstance(data, dict) or str(data.get("ok")) not in ("0", "1", "True", "False"):
+        return None
+    ok = str(data.get("ok")) in ("1", "True")
+    reason = " ".join(str(data.get("reason") or "").split())[:160]
+    return ok, reason
+
+
+def _check_avatar_mistral(data_url):
+    key = (os.environ.get("MISTRAL_API_KEY") or "").strip()
+    if not key or _backup_state["rest_until"].get("Mistral", 0) > time.time():
+        return None
+    model = (os.environ.get("MISTRAL_VISION_MODEL") or "").strip() or "mistral-medium-latest"
+    ticket = _provider_start("Mistral", "profile picture check")
+    try:
+        r = requests.post("https://api.mistral.ai/v1/chat/completions",
+                          headers={"Authorization": f"Bearer {key}"}, json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": AVATAR_CHECK_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Is this profile picture OK?"},
+                    {"type": "image_url", "image_url": data_url},
+                ]},
+            ],
+            "max_tokens": 200,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }, timeout=(10, 40))
+        if r.status_code != 200:
+            print(f"[ThinkStep] Avatar check: Mistral said {r.status_code}.")
+            if r.status_code == 429:
+                _rest_backup("Mistral")
+            return None
+        content = ((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+        return _parse_avatar_verdict(content)
+    except Exception as e:
+        print(f"[ThinkStep] Avatar check: Mistral error ({type(e).__name__}).")
+        return None
+    finally:
+        _provider_end("Mistral", ticket)
+
+
+def _check_avatar_groq(data_url):
+    key = _load_groq_api_key()
+    if not key:
+        return None
+    for vision_model in VISION_MODELS:
+        try:
+            r = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {key}"}, json={
+                "model": vision_model,
+                "messages": [
+                    {"role": "system", "content": AVATAR_CHECK_PROMPT},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": "Is this profile picture OK?"},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ]},
+                ],
+                "stream": False, "temperature": 0, "max_completion_tokens": 300,
+            }, timeout=(10, 40))
+            if r.status_code != 200:
+                continue
+            content = ((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+            verdict = _parse_avatar_verdict(content)
+            if verdict:
+                return verdict
+        except Exception as e:
+            print(f"[ThinkStep] Avatar check: Groq {vision_model} error ({type(e).__name__}).")
+    return None
+
+
+@app.route("/api/check-avatar", methods=["POST"])
+def check_avatar():
+    user = get_current_user()
+    if not has_full_features(user):
+        return jsonify({"ok": False, "reason": locked_note(user)}), 403
+    image = _json_body().get("image")
+    if not (valid_photo_data_url(image) and len(image) <= AVATAR_MAX_DATA_URL_CHARS):
+        return jsonify({"ok": False, "reason": "That picture couldn't be opened. Try a JPG or PNG."}), 400
+    if _avatar_limiter.hit(visitor_id()):
+        return jsonify({"ok": False, "reason": "That's a lot of pictures! Try again in a little while."}), 429
+    verdict = _check_avatar_mistral(image) or _check_avatar_groq(image)
+    if verdict is None:
+        # Never let an unchecked picture through.
+        return jsonify({"ok": False, "reason": "I couldn't check that picture right now. Please try again in a bit."}), 503
+    ok, reason = verdict
+    print(f"[ThinkStep] Avatar check: {'OK' if ok else 'blocked'} — {reason[:80]!r}")
+    return jsonify({"ok": ok, "reason": reason or ("Looks great!" if ok else "That picture can't be used.")})
 
 
 @app.route("/api/speak", methods=["POST"])
