@@ -1528,7 +1528,7 @@
     <div id="emojiTiers"></div>
     <input id="avatarFile" type="file" accept="image/*" hidden />
     <button type="button" class="submit-btn" id="avatarUpload">📷 Use a picture instead</button>
-    <div class="field-hint" style="text-align:center;margin-top:8px">Your picture stays on this device. It's never uploaded.</div>
+    <div class="field-hint" style="text-align:center;margin-top:8px">We check your picture once to make sure it's OK (no faces, nothing inappropriate, no emojis). It isn't saved anywhere but this device.</div>
   </div>
 </div>
 
@@ -2165,15 +2165,15 @@ function wireReportSetting() {
 
 /* =====================================================================
    Profile picture: an emoji (more unlock as you answer more questions)
-   or your own picture, which stays on this device only.
+   or your own picture (checked once by an AI, then kept on this device only).
    ===================================================================== */
 const EMOJI_TIERS = [
   { at: 0,   list: ['😀', '😎', '🐱', '🐶', '🦊', '🐼'] },
-  { at: 5,   list: ['🐸', '🐵', '🐧', '🐢', '🐝', '🦋'] },
-  { at: 15,  list: ['🦁', '🐯', '🐨', '🐙', '🦉', '🐬'] },
-  { at: 30,  list: ['🦄', '🐉', '🚀', '⭐', '🌈', '⚡'] },
-  { at: 50,  list: ['🤖', '👾', '🧠', '🎨', '🎸', '⚽'] },
-  { at: 100, list: ['👑', '💎', '🏆', '🎓', '🦖', '🔥'] },
+  { at: 15,  list: ['🐸', '🐵', '🐧', '🐢', '🐝', '🦋'] },
+  { at: 40,  list: ['🦁', '🐯', '🐨', '🐙', '🦉', '🐬'] },
+  { at: 80,  list: ['🦄', '🐉', '🚀', '⭐', '🌈', '⚡'] },
+  { at: 150, list: ['🤖', '👾', '🧠', '🎨', '🎸', '⚽'] },
+  { at: 300, list: ['👑', '💎', '🏆', '🎓', '🦖', '🔥'] },
 ];
 const avatarBtn = document.getElementById('avatarBtn');
 const avatarOverlay = document.getElementById('avatarOverlay');
@@ -2267,9 +2267,25 @@ document.getElementById('avatarFile').addEventListener('change', async (e) => {
     c.width = c.height = size;
     const sw = src.width, sh = src.height, side = Math.min(sw, sh);
     c.getContext('2d').drawImage(src, (sw - side) / 2, (sh - side) / 2, side, side, 0, 0, size, size);
-    pSet('avatar', JSON.stringify({ type: 'img', value: c.toDataURL('image/jpeg', 0.85) }));
+    const dataUrl = c.toDataURL('image/jpeg', 0.85);
+    // An AI checks it first: nothing inappropriate, no faces, and no emoji pictures
+    // (emojis are earned by leveling up). It isn't saved anywhere but this device.
+    const upBtn = document.getElementById('avatarUpload');
+    upBtn.disabled = true; upBtn.textContent = '🔎 Checking your picture…';
+    let verdict;
+    try {
+      const res = await fetch('/api/check-avatar', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl }) });
+      verdict = await res.json().catch(() => ({}));
+    } catch { verdict = { ok: false, reason: "I couldn't check that picture right now. Please try again in a bit." }; }
+    finally { upBtn.disabled = false; upBtn.textContent = '📷 Use a picture instead'; }
+    if (!verdict || verdict.ok !== true) {
+      showToast('🚫 ' + ((verdict && verdict.reason) || "That picture can't be used — try another one."), 5000);
+      return;
+    }
+    pSet('avatar', JSON.stringify({ type: 'img', value: dataUrl }));
     renderAvatar(); renderEmojiPicker();
-    showToast('🖼️ Profile picture saved on this device');
+    showToast('🖼️ Looks great — profile picture saved!');
   } catch { showToast("Couldn't open that picture — try another one."); }
 });
 let lastTierSeen = null;

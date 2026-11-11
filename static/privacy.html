@@ -168,7 +168,7 @@
     <ul>
       <li><strong>Account info (if you sign up):</strong> a name, a grade level (1–12), a password (stored as a secure hash — we never see or store your actual password), and an email address: a parent or guardian's if you're under 13, or (optional) your own if you're 13 or older. Without an email, an account only gets the basic tutor — photos, read aloud, quizzes, badges, saved and searchable chats, the progress page and password resets all need one. See our Terms for the full list.</li>
       <li><strong>Progress counts (accounts only):</strong> for each day, how many questions were asked, how many homework photos were sent, quiz scores, and badges earned — never what was asked. These counts are kept for about 40 days and are only used for the progress dashboard.</li>
-      <li><strong>Profile picture (only if you choose one):</strong> an emoji or a picture you pick is saved only in your own browser on your device. It is never uploaded to ThinkStep.</li>
+      <li><strong>Profile picture (only if you choose one):</strong> an emoji or a picture you pick is saved only in your own browser on your device. If you upload your own picture, it is sent once to an AI (Mistral, or Groq if Mistral is busy) to check that it's safe for kids — no faces, personal info or inappropriate content — and then thrown away. It is never saved on ThinkStep's servers. Please don't upload photos of people.</li>
       <li><strong>Chat messages:</strong> what you type to the AI tutor, so it can respond to you. Chat history is used to keep the conversation working and is not sold or shared with advertisers. As a safety measure, if a message contains language that may indicate someone is in danger (for example, mentions of self-harm or being hurt by someone), that message is automatically logged so the app's operator can check in — see "Your safety" below.</li>
       <li><strong>Homework photos (only if you send one):</strong> the photo is sent to Groq so the AI can read the problems on it (or, with "Check my work", read your steps and find the first mistake), then thrown away — ThinkStep never saves photos on its servers. The written-out text of the problems, and a smaller copy of the photo, are kept in your own browser with the rest of the chat. Please only photograph homework — no faces, names, or addresses.</li>
       <li><strong>Guest usage:</strong> if you don't create an account, we store an anonymous random ID in a cookie on your device to track how many free questions you've used — this is not linked to your name or any personal information.</li>
@@ -245,7 +245,8 @@
         train AI models.</li>
       <li><strong>Other AI providers</strong> (OpenRouter, Mistral, or Google Gemini): to keep ThinkStep fast
         when lots of students are using it, some questions are answered by one of these instead of Groq. They get
-        the same chat messages, first name, grade and difficulty setting. Photos are never sent to them.</li>
+        the same chat messages, first name, grade and difficulty setting. Homework photos are never sent to them
+        (profile pictures you upload are checked by Mistral — see "Profile picture" above).</li>
       <li><strong>Cloudflare</strong> (the load balancer): sees only numbers — how busy each AI is and how many
         questions were asked recently — to decide which AI answers. Never names, messages or photos.</li>
       <li><strong>Exa</strong> (web search, used through Groq): for some questions
