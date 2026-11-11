@@ -229,3 +229,27 @@ def test_cloudflare_broken_means_least_busy(app_module, client, setup, monkeypat
     _others(app_module)
     assert "backup answer" in _ask(client)
     assert app_module.balancer_status()["resting"]
+
+
+def test_cloudflare_knows_groq_is_best_then_the_order(app_module, setup, monkeypatch):
+    calls, behaviour = setup
+    for k in ("OPENROUTER_API_KEY", "MISTRAL_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.setenv(k, "x")
+    _cloudflare_on(monkeypatch, behaviour, '{"send_to": "Groq"}')
+    _others(app_module)
+    app_module.note_question("me")
+    app_module.choose_provider("me")
+    url, body = calls[0]
+    ais = _json.loads(body["messages"][1]["content"])["ais"]
+    assert [(a["name"], a["quality_rank"]) for a in ais] == [
+        ("Groq", 1), ("OpenRouter", 2), ("Mistral", 3), ("Gemini", 4)]
+    assert "Groq is the best" in body["messages"][0]["content"]
+
+
+def test_without_cloudflare_a_tie_goes_to_the_better_ai(app_module, setup, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "y")
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    _fill(app_module, "Groq", 3)
+    _fill(app_module, "OpenRouter", 1)
+    _fill(app_module, "Mistral", 1)
+    assert app_module.choose_provider("me") == "OpenRouter"
