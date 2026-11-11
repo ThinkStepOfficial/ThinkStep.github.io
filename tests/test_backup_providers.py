@@ -1,7 +1,7 @@
-"""Backup AI providers: Groq answers up to 5 students at once, then
-OpenRouter up to 4, then Mistral up to 4 — only providers with a key set.
-Students are never told they were switched. The admin page shows who is
-on which provider."""
+"""AI providers: no limit on students. Questions go to Groq, OpenRouter or
+Mistral (only providers with a key set), and the Cloudflare balancer spreads
+them evenly — or, without it, the least busy AI answers. Students are never
+told they were switched. The admin page shows who is on which AI."""
 import json as _json
 
 import pytest
@@ -30,24 +30,42 @@ class _Resp:
         return False
 
 
+def _reset(app_module):
+    app_module._backup_state.update(active={}, rest_until={}, answers={}, recent={})
+    app_module._balance.update(asks={}, log=[], cf_checks=0, cf_rest_until=0.0)
+
+
 @pytest.fixture()
 def setup(app_module, monkeypatch):
-    for p in app_module.BACKUP_PROVIDERS:
-        monkeypatch.delenv(p["key_env"], raising=False)
-    app_module._backup_state.update(active={}, rest_until={}, answers={}, recent={})
+    for k in [p["key_env"] for p in app_module.BACKUP_PROVIDERS] + ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"]:
+        monkeypatch.delenv(k, raising=False)
+    _reset(app_module)
     monkeypatch.setattr(app_module, "_load_groq_api_key", lambda: "test-key-not-real")
     monkeypatch.setattr(app_module, "topic_gate_check", lambda h, k: {"blocked": False, "web": False})
     calls = []
-    behaviour = {"groq": 200, "backup": 200}
+    behaviour = {"groq": 200, "backup": 200, "cloudflare": None}
+
+    class CF:
+        status_code = 200
+        def json(self):
+            return {"choices": [{"message": {"content": behaviour["cloudflare"]}}]}
 
     def fake_post(url, headers=None, json=None, stream=None, timeout=None):
-        calls.append(url)
+        calls.append((url, json))
+        if "cloudflare" in url:
+            if behaviour["cloudflare"] is None:
+                r = CF(); r.status_code = 500; return r
+            return CF()
         if "groq.com" in url:
             return _Resp(behaviour["groq"], ["groq ", "answer"])
         return _Resp(behaviour["backup"], ["backup ", "answer"])
     monkeypatch.setattr(app_module.requests, "post", fake_post)
     yield calls, behaviour
-    app_module._backup_state.update(active={}, rest_until={}, answers={}, recent={})
+    _reset(app_module)
+
+
+def _urls(calls):
+    return [u for u, _ in calls]
 
 
 def _fill(app_module, name, n):
@@ -55,49 +73,53 @@ def _fill(app_module, name, n):
         app_module._provider_start(name, f"busy kid {i}")
 
 
+def _others(app_module, n=1):
+    for i in range(n):
+        app_module.note_question(f"other kid {i}")
+
+
 def _ask(client):
     return client.post("/api/chat", json={"messages": [{"role": "user", "content": "what is 7 x 8?"}]}).get_data(as_text=True)
 
+
+def _cloudflare_on(monkeypatch, behaviour, reply):
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
+    behaviour["cloudflare"] = reply
+
+
+# ---------- no limits, even spread ----------
 
 def test_quiet_groq_answers_normally(app_module, client, setup, monkeypatch):
     calls, _ = setup
     monkeypatch.setenv("MISTRAL_API_KEY", "x")
     assert "groq answer" in _ask(client)
-    assert not any("mistral" in c for c in calls)
     assert app_module.groq_active_count() == 0  # counter goes back down
 
 
-def test_crowded_groq_sends_student_to_backup(app_module, client, setup, monkeypatch):
-    calls, _ = setup
-    monkeypatch.setenv("MISTRAL_API_KEY", "x")
-    _fill(app_module, "Groq", app_module.GROQ_LIMIT)
-    assert "backup answer" in _ask(client)
-    assert any("mistral.ai" in c for c in calls)
-    assert not any("groq.com/openai/v1/chat" in c for c in calls)
-
-
-def test_crowded_but_no_keys_still_uses_groq(app_module, client, setup):
-    _fill(app_module, "Groq", app_module.GROQ_LIMIT)
+def test_no_backup_keys_means_groq_always(app_module, client, setup):
+    _fill(app_module, "Groq", 50)
     assert "groq answer" in _ask(client)
 
 
-def test_order_is_groq_then_openrouter_then_mistral(app_module, client, setup, monkeypatch):
+def test_busy_groq_sends_student_to_least_busy_ai(app_module, client, setup, monkeypatch):
     calls, _ = setup
-    monkeypatch.setenv("MISTRAL_API_KEY", "x")
     monkeypatch.setenv("OPENROUTER_API_KEY", "y")
-    _fill(app_module, "Groq", 5)
-    _ask(client)
-    assert "openrouter.ai" in calls[-1]
-    _fill(app_module, "OpenRouter", 4)
-    _ask(client)
-    assert "mistral.ai" in calls[-1]
-    _fill(app_module, "Mistral", 4)
-    assert "groq answer" in _ask(client)  # everyone full -> Groq takes it
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    _fill(app_module, "Groq", 3)
+    _fill(app_module, "OpenRouter", 2)
+    assert "backup answer" in _ask(client)
+    assert "mistral.ai" in _urls(calls)[-1]
 
 
-def test_limits_are_5_4_4(app_module):
-    lim = {p["name"]: p["limit"] for p in app_module.BACKUP_PROVIDERS}
-    assert app_module.GROQ_LIMIT == 5 and lim["OpenRouter"] == 4 and lim["Mistral"] == 4
+def test_there_is_no_limit_on_students(app_module, client, setup, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "y")
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    for name in ("Groq", "OpenRouter", "Mistral"):
+        _fill(app_module, name, 40)
+    assert "answer" in _ask(client)  # 121st student still gets an answer
+    assert not hasattr(app_module, "GROQ_LIMIT")
+    assert all("limit" not in p for p in app_module.BACKUP_PROVIDERS)
 
 
 def test_switch_is_silent(app_module, client, setup, monkeypatch):
@@ -114,14 +136,14 @@ def test_groq_429_everywhere_falls_to_backup(app_module, client, setup, monkeypa
     behaviour["groq"] = 429
     monkeypatch.setenv("GEMINI_API_KEY", "z")
     assert "backup answer" in _ask(client)
-    assert any("generativelanguage" in c for c in calls)
+    assert "generativelanguage" in _urls(calls)[-1]
 
 
 def test_failing_backup_rests_and_groq_answers(app_module, client, setup, monkeypatch):
     calls, behaviour = setup
     behaviour["backup"] = 500
     monkeypatch.setenv("MISTRAL_API_KEY", "x")
-    _fill(app_module, "Groq", app_module.GROQ_LIMIT)
+    _fill(app_module, "Groq", 5)
     assert "groq answer" in _ask(client)
     assert app_module.backups_ready() == []  # Mistral is resting
 
@@ -131,7 +153,7 @@ def test_admin_sees_who_is_on_which_provider(app_module, client, setup, monkeypa
     _fill(app_module, "Groq", 5)
     _ask(client)
     st = {p["name"]: p for p in app_module.backup_status()["providers"]}
-    assert len(st["Groq"]["now"]) == 5 and st["Groq"]["limit"] == 5
+    assert len(st["Groq"]["now"]) == 5 and "limit" not in st["Groq"]
     assert st["OpenRouter"]["ready"] and not st["Mistral"]["ready"]
     assert st["OpenRouter"]["answers"] == 1 and st["OpenRouter"]["now"] == []
     assert len(st["OpenRouter"]["recent"]) == 1
@@ -144,106 +166,66 @@ def test_counters_go_back_down(app_module, client, setup):
     assert st["Groq"]["answers"] == 1 and len(st["Groq"]["recent"]) == 1
 
 
-# ---------- balancer (the Cloudflare AI decides) ----------
+# ---------- the Cloudflare balancer decides ----------
 
-@pytest.fixture()
-def fair(app_module, monkeypatch):
-    for k in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"):
-        monkeypatch.delenv(k, raising=False)
-    app_module._balance.update(asks={}, log=[], cf_checks=0, cf_rest_until=0.0)
-    yield
-    app_module._balance.update(asks={}, log=[], cf_checks=0, cf_rest_until=0.0)
-
-
-def _history(app_module, who, n):
-    for _ in range(n):
-        app_module.note_question(who)
-
-
-def _cloudflare_says(app_module, monkeypatch, reply, status=200):
-    """Cloudflare answers with `reply`; Groq/backups answer normally."""
-    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
-    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
-    sent = []
-
-    class CF:
-        status_code = status
-        def json(self):
-            return {"choices": [{"message": {"content": reply}}]}
-
-    def fake_post(url, headers=None, json=None, stream=None, timeout=None):
-        sent.append((url, json))
-        if "cloudflare" in url:
-            return CF()
-        if "groq.com" in url:
-            return _Resp(200, ["groq ", "answer"])
-        return _Resp(200, ["backup ", "answer"])
-    monkeypatch.setattr(app_module.requests, "post", fake_post)
-    return sent
-
-
-def test_no_cloudflare_key_means_everyone_stays_on_groq(app_module, setup, fair, monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "y")
-    _history(app_module, "hog", 50)
-    _history(app_module, "kid", 1)
-    assert app_module.choose_provider("hog") is None
-
-
-def test_cloudflare_picks_the_ai(app_module, client, setup, fair, monkeypatch):
+def test_cloudflare_picks_the_ai(app_module, client, setup, monkeypatch):
+    calls, behaviour = setup
     monkeypatch.setenv("OPENROUTER_API_KEY", "y")
     monkeypatch.setenv("MISTRAL_API_KEY", "x")
-    sent = _cloudflare_says(app_module, monkeypatch, '{"send_to": "Mistral", "reason": "hogging groq"}')
-    _history(app_module, "kid", 1)
+    _cloudflare_on(monkeypatch, behaviour, '{"send_to": "Mistral", "reason": "spread the load"}')
+    _others(app_module)
     assert "backup answer" in _ask(client)
-    assert "mistral.ai" in sent[-1][0]  # went where the model said, not the first backup
+    assert "mistral.ai" in _urls(calls)[-1]  # where the model said, even though nobody was busy
     log = app_module.balancer_status()["recent"]
-    assert log[0]["sendTo"] == "Mistral" and log[0]["reason"] == "hogging groq"
+    assert log[0]["sendTo"] == "Mistral" and log[0]["reason"] == "spread the load"
 
 
-def test_cloudflare_can_keep_a_student_on_groq(app_module, client, setup, fair, monkeypatch):
+def test_cloudflare_can_keep_a_student_on_groq(app_module, client, setup, monkeypatch):
+    calls, behaviour = setup
     monkeypatch.setenv("OPENROUTER_API_KEY", "y")
-    _cloudflare_says(app_module, monkeypatch, '{"send_to": "Groq", "reason": "normal use"}')
-    _history(app_module, "kid", 1)
+    _cloudflare_on(monkeypatch, behaviour, '{"send_to": "Groq", "reason": "even"}')
+    _fill(app_module, "Groq", 9)
+    _others(app_module)
     assert "groq answer" in _ask(client)
 
 
-def test_cloudflare_cannot_pick_a_full_or_unknown_ai(app_module, client, setup, fair, monkeypatch):
+def test_unusable_cloudflare_answer_means_least_busy(app_module, client, setup, monkeypatch):
+    calls, behaviour = setup
     monkeypatch.setenv("OPENROUTER_API_KEY", "y")
-    _cloudflare_says(app_module, monkeypatch, '{"send_to": "SomethingElse"}')
-    _history(app_module, "kid", 1)
-    assert "groq answer" in _ask(client)
+    _cloudflare_on(monkeypatch, behaviour, '{"send_to": "SomethingElse"}')
+    _fill(app_module, "Groq", 2)
+    _others(app_module)
+    assert "backup answer" in _ask(client)
 
 
-def test_cloudflare_only_sees_numbers(app_module, fair, setup, monkeypatch):
+def test_cloudflare_only_sees_numbers(app_module, setup, monkeypatch):
+    calls, behaviour = setup
     monkeypatch.setenv("OPENROUTER_API_KEY", "y")
-    sent = _cloudflare_says(app_module, monkeypatch, '{"send_to": "OpenRouter"}')
-    _history(app_module, "Secret Name (grade 5)", 6)
-    _history(app_module, "Other Kid (grade 3)", 1)
+    _cloudflare_on(monkeypatch, behaviour, '{"send_to": "OpenRouter"}')
+    for _ in range(6):
+        app_module.note_question("Secret Name (grade 5)")
+    app_module.note_question("Other Kid (grade 3)")
     assert app_module.choose_provider("Secret Name (grade 5)") == "OpenRouter"
-    url, body = sent[0]
+    url, body = calls[0]
     assert "api.cloudflare.com" in url and body["model"] == "@cf/openai/gpt-oss-20b"
     dumped = _json.dumps(body)
-    assert "Secret" not in dumped and "Other Kid" not in dumped
+    assert "Secret" not in dumped and "Other Kid" not in dumped and "slots" not in dumped
 
 
-def test_one_student_alone_is_not_balanced(app_module, setup, fair, monkeypatch):
+def test_one_student_alone_skips_cloudflare(app_module, setup, monkeypatch):
+    calls, behaviour = setup
     monkeypatch.setenv("OPENROUTER_API_KEY", "y")
-    sent = _cloudflare_says(app_module, monkeypatch, '{"send_to": "OpenRouter"}')
-    _history(app_module, "only kid", 9)
-    assert app_module.choose_provider("only kid") is None and sent == []
+    _cloudflare_on(monkeypatch, behaviour, '{"send_to": "OpenRouter"}')
+    app_module.note_question("only kid")
+    assert app_module.choose_provider("only kid") is None and calls == []
 
 
-def test_cloudflare_broken_keeps_students_on_groq(app_module, client, setup, fair, monkeypatch):
+def test_cloudflare_broken_means_least_busy(app_module, client, setup, monkeypatch):
+    calls, behaviour = setup
     monkeypatch.setenv("OPENROUTER_API_KEY", "y")
-    _cloudflare_says(app_module, monkeypatch, "", status=500)
-    _history(app_module, "kid", 1)
-    assert "groq answer" in _ask(client)
-    assert app_module.balancer_status()["resting"]
-
-
-def test_groq_full_still_moves_even_if_model_says_groq(app_module, client, setup, fair, monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "y")
-    _cloudflare_says(app_module, monkeypatch, '{"send_to": "Groq"}')
-    _fill(app_module, "Groq", app_module.GROQ_LIMIT)
-    _history(app_module, "kid", 1)
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")  # behaviour["cloudflare"] None -> 500
+    _fill(app_module, "Groq", 4)
+    _others(app_module)
     assert "backup answer" in _ask(client)
+    assert app_module.balancer_status()["resting"]
