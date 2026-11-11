@@ -299,6 +299,10 @@ BACKUP_PROVIDERS = [
      "model": "gemini-flash-latest",
      "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"},
 ]
+# Best to worst — the balancer prefers better ones when load is close.
+# Groq: gpt-oss-120b, fastest and smartest. OpenRouter: the same model, but
+# its free tier is slower. Mistral: Mistral Medium, very good. Gemini: Flash.
+PROVIDER_RANK = {"Groq": 1, "OpenRouter": 2, "Mistral": 3, "Gemini": 4}
 BACKUP_REST_SECONDS = 120
 RECENT_PROVIDER_SECONDS = 15 * 60
 _backup_lock = threading.Lock()
@@ -456,10 +460,14 @@ students EVENLY across the AIs so none of them gets overloaded and every
 student gets a fast answer. There is no limit on students.
 You get live numbers: how many students each AI is answering right now, and
 how many questions each student asked in the last 5 minutes (students are
-anonymous; "this_student" is the one asking now). Groq is the main AI; the
-backups are also good. Send this question to the AI that keeps the load most
-even. Students who ask a lot should go to whichever AI is least busy. If the
-AIs are equally busy, pick Groq. Only pick an AI from the list.
+anonymous; "this_student" is the one asking now).
+The AIs are NOT equally good. Each has a "quality_rank": 1 is the best.
+Groq is the best (rank 1), then the others in rank order. Prefer better AIs:
+only send a student to a lower-ranked AI when the better ones are clearly
+busier, so the load stays reasonably even without giving up quality. If two
+AIs are about as busy, pick the better one. Students who ask a lot can go to
+a lower-ranked AI first so the best one stays free for everyone else.
+Only pick an AI from the list.
 Reply with JSON only: {"send_to": "<AI name>", "reason": "a few words"}"""
 _balance = {"asks": {}, "log": [], "cf_checks": 0, "cf_rest_until": 0.0}
 
@@ -542,8 +550,9 @@ def choose_provider(who):
         facts = {
             "this_student_questions_last_5_min": mine,
             "other_students_questions_last_5_min": others,
-            "ais": [{"name": "Groq", "answering_now": groq_active_count()}] + [
-                {"name": p["name"], "answering_now": provider_count(p["name"])} for p in backups],
+            "ais": [{"name": "Groq", "quality_rank": 1, "answering_now": groq_active_count()}] + [
+                {"name": p["name"], "quality_rank": PROVIDER_RANK[p["name"]],
+                 "answering_now": provider_count(p["name"])} for p in backups],
         }
         text = _ask_cloudflare(facts)
     if text is None:
