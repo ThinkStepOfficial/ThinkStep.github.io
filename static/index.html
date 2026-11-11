@@ -52,6 +52,7 @@
     background: var(--bg);
     color: var(--text);
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
   }
@@ -60,6 +61,7 @@
     grid-template-columns: 240px 1fr 264px;
     grid-template-rows: auto auto 1fr;
     height: 100vh;
+    height: 100dvh;
   }
   header {
     grid-column: 1 / 4;
@@ -272,6 +274,8 @@
   #exportBtn:hover { background: var(--primary-light); border-color: var(--accent); }
 
   main {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 24px;
     display: flex;
@@ -370,6 +374,7 @@
   }
   input#prompt {
     flex: 1;
+    min-width: 0;
     padding: 13px 16px;
     border-radius: 12px;
     border: 1px solid var(--border);
@@ -962,9 +967,12 @@
 
   /* ===== MOBILE (<= 680px): both sidebars become drawers, stacked layout ===== */
   @media (max-width: 680px) {
+    /* a simple top-to-bottom stack: header, chat (fills the rest), typing box at the bottom */
     .app {
-      grid-template-columns: 1fr;
+      display: flex;
+      flex-direction: column;
     }
+    .chat-area { flex: 1; min-height: 0; }
     .sidebar-left {
       position: fixed;
       top: 0;
@@ -997,8 +1005,8 @@
 
     .nav-toggle { min-width: 42px; min-height: 42px; font-size: 21.5px; }
 
-    .chat-toolbar { padding: 8px 14px; }
-    #exportBtn { min-height: 38px; }
+    .chat-toolbar { padding: 6px 12px; gap: 6px; }
+    #exportBtn, #feedbackLink { min-height: 34px; padding: 5px 11px; font-size: 13.5px; }
 
     main { padding: 14px; gap: 10px; -webkit-overflow-scrolling: touch; }
     .msg { max-width: 90%; font-size: 17px; padding: 11px 14px; }
@@ -1010,10 +1018,13 @@
       position: sticky;
       bottom: 0;
     }
-    input#prompt { font-size: 17px; padding: 13px 14px; min-height: 46px; } /* 16px avoids iOS zoom */
+    #form { gap: 6px; }
+    input#prompt { font-size: 17px; padding: 12px 13px; min-height: 46px; min-width: 0; } /* 16px+ avoids iOS zoom */
     button { padding: 0 16px; min-height: 46px; }
-    #send { min-width: 64px; }
-    #micBtn, #photoBtn, #talkBtn { padding: 0; min-width: 46px; }
+    #send { min-width: 58px; padding: 0 12px; }
+    #micBtn, #photoBtn, #talkBtn { padding: 0; min-width: 42px; width: 42px; font-size: 18px; }
+    .msg.user { margin-right: 34px; }
+    .msg-avatar { right: -34px; width: 28px; height: 28px; font-size: 16px; }
 
     /* Right sidebar drawer: bigger touch targets everywhere inside */
     .sidebar-right {
@@ -1197,10 +1208,36 @@
   @media (hover: none) { .simple-btn { opacity: .9; } }
 
   /* ===== PROFILE PICTURE ===== */
-  .avatar-btn { width: 40px; height: 40px; border-radius: 50%; padding: 0; font-size: 22px; line-height: 1;
-                background: var(--primary-light); border: 2px solid var(--border); overflow: hidden; box-shadow: none; }
-  .avatar-btn:hover { background: var(--primary-light); border-color: var(--primary); box-shadow: none; }
-  .avatar-btn img, .avatar-big img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* the avatar button wears a progress ring: how close you are to unlocking the next emojis */
+  .avatar-btn { width: 44px; height: 44px; border-radius: 50%; padding: 3px; font-size: 22px; line-height: 1; border: none;
+                background: conic-gradient(var(--primary) calc(var(--p, 0) * 1%), var(--border) 0); box-shadow: none;
+                position: relative; flex-shrink: 0; }
+  .avatar-btn:hover { background: conic-gradient(var(--primary-dark) calc(var(--p, 0) * 1%), var(--border) 0); box-shadow: none; }
+  .avatar-btn .av-in { width: 100%; height: 100%; border-radius: 50%; display: grid; place-items: center;
+                       background: var(--primary-light); overflow: hidden; border: 2px solid var(--card); }
+  .avatar-btn .av-lvl { position: absolute; right: -4px; bottom: -4px; min-width: 18px; height: 18px; padding: 0 4px;
+                        border-radius: 999px; background: var(--primary); color: #fff; font-size: 11px; font-weight: 800;
+                        display: grid; place-items: center; border: 2px solid var(--card); line-height: 1; }
+  .avatar-btn.levelup { animation: avPop .7s var(--ease) 3; }
+  @keyframes avPop { 50% { transform: scale(1.22) rotate(-8deg); } }
+  .avatar-btn img, .avatar-big img, .msg-avatar img, .hero-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* your picture next to everything you send */
+  .msg.user { position: relative; margin-right: 40px; }
+  .msg-avatar { position: absolute; right: -40px; bottom: 0; width: 32px; height: 32px; border-radius: 50%;
+                display: grid; place-items: center; font-size: 18px; line-height: 1; white-space: normal;
+                background: var(--primary-light); border: 2px solid var(--card); overflow: hidden;
+                box-shadow: var(--shadow-sm); user-select: none; pointer-events: none; }
+  /* big picture on the welcome screen */
+  .hero-avatar { width: 88px; height: 88px; border-radius: 50%; padding: 4px; margin: 0 auto 10px; display: block;
+                 background: conic-gradient(var(--primary) calc(var(--p, 0) * 1%), var(--border) 0); box-shadow: var(--shadow-md);
+                 font-size: 46px; line-height: 1; }
+  .hero-avatar:hover { box-shadow: var(--shadow-md); transform: scale(1.04); background: conic-gradient(var(--primary) calc(var(--p, 0) * 1%), var(--border) 0); }
+  .hero-avatar .av-in { width: 100%; height: 100%; border-radius: 50%; display: grid; place-items: center;
+                        background: var(--primary-light); overflow: hidden; border: 3px solid var(--card); }
+  .hero-level { font-size: 14px; color: var(--muted); margin: -2px 0 10px; }
+  .hero-level b { color: var(--primary-dark); }
+  .level-bar { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; margin: 8px 0 4px; }
+  .level-bar > div { height: 100%; background: var(--primary); border-radius: 999px; transition: width .4s var(--ease); }
   .avatar-big { width: 84px; height: 84px; border-radius: 50%; margin: 0 auto 10px; display: grid; place-items: center;
                 font-size: 46px; background: var(--primary-light); overflow: hidden; border: 3px solid var(--border); }
   .emoji-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 12px 0; }
@@ -2065,6 +2102,7 @@ function updateEmailUI() {
   document.getElementById('chatSearch').placeholder = hasFull() ? '🔍 Search your chats' : '🔒 Search needs an email';
   autoReadBox.checked = hasFull() && autoReadOn();
   renderBadges();
+  try { renderAvatar(); } catch {}
   // a quiz can't keep running without an email (the tutor stops counting it)
   try {
     if (!hasFull() && getActive().quiz) { delete getActive().quiz; saveChats(chats); }
@@ -2147,13 +2185,44 @@ function avatarHtml(a) {
   return a.type === 'img' && /^data:image\/(jpeg|png|webp);base64,/.test(a.value)
     ? `<img src="${a.value}" alt="">` : escapeHtml(a.value || '😀');
 }
+const LEVEL_NAMES = ['Starter', 'Explorer', 'Thinker', 'Star', 'Genius', 'Legend'];
+// Your level = how many emoji tiers you've unlocked; pct = how close the next one is.
+function avatarLevel() {
+  const done = questionsDone();
+  let i = 0;
+  EMOJI_TIERS.forEach((t, k) => { if (done >= t.at) i = k; });
+  const next = EMOJI_TIERS[i + 1];
+  const from = EMOJI_TIERS[i].at;
+  return { level: i + 1, name: LEVEL_NAMES[i] || 'Legend', done, next: next ? next.at : null,
+           left: next ? next.at - done : 0,
+           pct: next ? Math.round(((done - from) / (next.at - from)) * 100) : 100 };
+}
+function levelLine(lv) {
+  if (!hasFull()) return 'Tap to pick your own profile picture';
+  return lv.next ? `<b>Level ${lv.level} · ${lv.name}</b> — ${lv.left} more question${lv.left === 1 ? '' : 's'} to unlock new emojis`
+                 : `<b>Level ${lv.level} · ${lv.name}</b> — every emoji unlocked! 🏆`;
+}
 function renderAvatar() {
-  const a = myAvatar();
-  avatarBtn.innerHTML = avatarHtml(a);
+  const a = myAvatar(), lv = avatarLevel(), full = hasFull();
+  const pct = full ? lv.pct : 0;
+  avatarBtn.style.setProperty('--p', pct);
+  avatarBtn.innerHTML = `<span class="av-in">${avatarHtml(a)}</span>` + (full ? `<span class="av-lvl">${lv.level}</span>` : '');
+  avatarBtn.title = full ? `Level ${lv.level} ${lv.name}` + (lv.next ? ` — ${lv.left} more to unlock new emojis` : '')
+                         : 'Your profile picture';
   document.getElementById('avatarBig').innerHTML = avatarHtml(a);
+  document.querySelectorAll('.msg-avatar').forEach(e => { e.innerHTML = avatarHtml(a); });
+  const hero = document.getElementById('heroAvatar');
+  if (hero) {
+    hero.style.setProperty('--p', pct);
+    hero.innerHTML = `<span class="av-in">${avatarHtml(a)}</span>`;
+    const line = document.getElementById('heroLevel');
+    if (line) line.innerHTML = levelLine(lv);
+  }
 }
 function renderEmojiPicker() {
-  const done = questionsDone(), a = myAvatar();
+  const done = questionsDone(), a = myAvatar(), lv = avatarLevel();
+  document.getElementById('avatarSub').innerHTML = levelLine(lv) +
+    `<div class="level-bar"><div style="width:${lv.pct}%"></div></div>`;
   const box = document.getElementById('emojiTiers');
   box.innerHTML = '';
   EMOJI_TIERS.forEach(t => {
@@ -2207,8 +2276,12 @@ let lastTierSeen = null;
 function checkEmojiUnlocks() {
   const done = questionsDone();
   const tier = EMOJI_TIERS.filter(t => done >= t.at).length;
-  if (lastTierSeen !== null && tier > lastTierSeen && hasFull()) showToast('🎉 New profile emojis unlocked! Tap your picture to see.');
+  if (lastTierSeen !== null && tier > lastTierSeen && hasFull()) {
+    showToast(`🎉 Level ${tier} — ${LEVEL_NAMES[tier - 1] || 'Legend'}! New profile emojis unlocked. Tap your picture!`, 4500);
+    avatarBtn.classList.remove('levelup'); void avatarBtn.offsetWidth; avatarBtn.classList.add('levelup');
+  }
   lastTierSeen = tier;
+  renderAvatar();
 }
 
 /* =====================================================================
@@ -2979,11 +3052,15 @@ const STARTERS = [
 function renderEmptyState() {
   const first = currentUser && currentUser.name ? currentUser.name.trim().split(/\s+/)[0] : '';
   chat.innerHTML = `<div class="empty-state" id="empty">
+      <button type="button" class="hero-avatar" id="heroAvatar" title="Your profile picture" aria-label="Your profile picture"></button>
+      <div class="hero-level" id="heroLevel"></div>
       <h2>Hi${first ? ' ' + escapeHtml(first) : ''}! I'm ThinkStep 🧠</h2>
       <p>Ask me something you're working on, and I'll help you think it through.</p>
       <div class="starter-row">${STARTERS.map(t =>
         `<button type="button" class="starter-chip">${escapeHtml(t)}</button>`).join('')}</div>
     </div>`;
+  document.getElementById('heroAvatar').addEventListener('click', openAvatarPicker);
+  try { renderAvatar(); } catch {}
   chat.querySelectorAll('.starter-chip').forEach(b => b.addEventListener('click', () => {
     if (busy) return;
     promptEl.value = b.textContent;
@@ -3084,6 +3161,13 @@ function addMessage(role, text, msg) {
       showAiText(div, text);
       if (text) attachSayButton(div, text);
     }
+  }
+  if (role === 'user') {
+    const av = document.createElement('span');
+    av.className = 'msg-avatar';
+    av.setAttribute('aria-hidden', 'true');
+    av.innerHTML = avatarHtml(myAvatar());
+    div.appendChild(av);
   }
   chat.appendChild(div);
   scrollToBottom(true);
