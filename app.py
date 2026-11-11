@@ -279,33 +279,24 @@ TUTOR_ATTEMPTS = [
 # ThinkStep can answer per day for free.
 RATE_LIMIT_FALLBACK = {"openai/gpt-oss-120b": "openai/gpt-oss-20b"}
 
-# ---- Backup AI providers (for when Groq is crowded) ----
-# Each provider answers up to its limit of students AT THE SAME MOMENT:
-#   Groq 5  →  then OpenRouter 4  →  then Mistral 4  (→ Gemini 4, if a key is set)
-# The 6th student at once goes to OpenRouter, the 10th to Mistral, and so
-# on. If every provider is full, Groq takes them anyway (it just waits).
-# A backup is also tried if Groq says "busy" (429) for every model.
+# ---- AI providers: Groq + backups, no limit on students ----
+# There's no cap on how many students can use ThinkStep at once. Every
+# question goes to Groq, OpenRouter or Mistral (or Gemini, if a key is set),
+# and the Cloudflare balancer (below) spreads students out so no AI gets
+# overloaded. A backup is also tried if Groq says "busy" (429).
 # A backup is only used if its key is set on Render (Environment tab).
-# Students are never told they were switched — the answer just arrives.
+# Students are never told which AI answered — the answer just arrives.
 # A backup that fails takes a short rest before it's tried again.
 # Photos are still read by Groq; only the typed answer comes from a backup.
-def _limit(env, default):
-    try:
-        return max(1, int(os.environ.get(env, "") or default))
-    except ValueError:
-        return default
-
-
-GROQ_LIMIT = _limit("GROQ_LIMIT", 5)
 BACKUP_PROVIDERS = [
     {"name": "OpenRouter", "key_env": "OPENROUTER_API_KEY", "model_env": "OPENROUTER_MODEL",
-     "model": "openai/gpt-oss-120b:free", "limit": _limit("OPENROUTER_LIMIT", 4),
+     "model": "openai/gpt-oss-120b:free",
      "url": "https://openrouter.ai/api/v1/chat/completions"},
     {"name": "Mistral", "key_env": "MISTRAL_API_KEY", "model_env": "MISTRAL_MODEL",
-     "model": "mistral-medium-latest", "limit": _limit("MISTRAL_LIMIT", 4),
+     "model": "mistral-medium-latest",
      "url": "https://api.mistral.ai/v1/chat/completions"},
     {"name": "Gemini", "key_env": "GEMINI_API_KEY", "model_env": "GEMINI_MODEL",
-     "model": "gemini-flash-latest", "limit": _limit("GEMINI_LIMIT", 4),
+     "model": "gemini-flash-latest",
      "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"},
 ]
 BACKUP_REST_SECONDS = 120
@@ -337,17 +328,14 @@ def _provider_end(name, ticket):
         _backup_state["active"].get(name, {}).pop(ticket, None)
 
 
-def backups_ready(need_room=False):
-    """Backups that have a key set and aren't resting after a failure
-    (and, with need_room, aren't already at their limit), in order."""
+def backups_ready():
+    """Backups that have a key set and aren't resting after a failure, in order."""
     now = time.time()
     with _backup_lock:
         rest = dict(_backup_state["rest_until"])
-        counts = {k: len(v) for k, v in _backup_state["active"].items()}
     return [p for p in BACKUP_PROVIDERS
             if (os.environ.get(p["key_env"]) or "").strip()
-            and rest.get(p["name"], 0) <= now
-            and (not need_room or counts.get(p["name"], 0) < p["limit"])]
+            and rest.get(p["name"], 0) <= now]
 
 
 def backup_status():
@@ -366,7 +354,7 @@ def backup_status():
         rows = sorted(((t, who) for who, (p, t) in recent.items() if p == name), reverse=True)
         return [{"who": who, "secondsAgo": int(now - t)} for t, who in rows]
 
-    providers = [{"name": "Groq", "ready": True, "resting": False, "limit": GROQ_LIMIT,
+    providers = [{"name": "Groq", "ready": True, "resting": False,
                   "answers": answers.get("Groq", 0), "now": active.get("Groq", []),
                   "recent": recent_for("Groq")}]
     for p in BACKUP_PROVIDERS:
@@ -374,7 +362,6 @@ def backup_status():
             "name": p["name"],
             "ready": bool((os.environ.get(p["key_env"]) or "").strip()),
             "resting": rest.get(p["name"], 0) > now,
-            "limit": p["limit"],
             "answers": answers.get(p["name"], 0),
             "now": active.get(p["name"], []),
             "recent": recent_for(p["name"]),
@@ -392,11 +379,11 @@ def _rest_backup(name, seconds=BACKUP_REST_SECONDS):
         _backup_state["rest_until"][name] = time.time() + seconds
 
 
-def answer_with_backup(messages, emit, who="someone", need_room=True, prefer=None):
-    """Streams an answer from the first backup (in order) that has room,
+def answer_with_backup(messages, emit, who="someone", prefer=None):
+    """Streams an answer from a backup (the balancer's pick first),
     calling emit(text) for each piece. Returns (provider_name, finish_reason),
     or (None, None) if no backup could answer before anything was shown."""
-    order = backups_ready(need_room=need_room)
+    order = backups_ready()
     order.sort(key=lambda p: p["name"] != prefer)  # the balancer's pick goes first
     for p in order:
         key = (os.environ.get(p["key_env"]) or "").strip()
@@ -452,27 +439,27 @@ def answer_with_backup(messages, emit, who="someone", need_room=True, prefer=Non
     return None, None
 
 
-# ---- Load balancer: a small Cloudflare AI keeps things fair ----
-# Whenever more than one student is using ThinkStep and a backup AI has an
-# open slot, a small Cloudflare model looks at the numbers — how many
-# questions each student asked lately, how busy each AI is, which have room
-# — and DECIDES where this student's question should go (Groq, OpenRouter
-# or Mistral) so nobody hogs Groq and everyone gets fast answers. There are
-# no fixed fairness rules: the model makes the call.
+# ---- Load balancer: a small Cloudflare AI spreads students evenly ----
+# Whenever more than one student is using ThinkStep and a backup AI is
+# ready, a small Cloudflare model looks at the numbers — how many questions
+# each student asked lately and how many students each AI is answering right
+# now — and DECIDES which AI should answer this question, so the work is
+# spread evenly and nobody waits. There are no slot limits.
 # It only ever sees numbers, never names or questions.
-# If Cloudflare isn't set up or doesn't answer, the student simply stays on
-# Groq. (Groq's hard limit of GROQ_LIMIT at once still applies.)
+# If Cloudflare isn't set up or doesn't answer, the question goes to
+# whichever AI is least busy right now (Groq if it's a tie).
 # Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN on Render to turn it on.
 BALANCE_WINDOW = 5 * 60          # it sees the last 5 minutes of questions
 CLOUDFLARE_DEFAULT_MODEL = "@cf/openai/gpt-oss-20b"
-BALANCER_PROMPT = """You are the load balancer for a homework tutor app for kids. Your goal: every
-student gets fast, good answers, and no single student hogs the main AI.
-You get live numbers: how many questions each student asked in the last 5
-minutes (students are anonymous; "this_student" is the one asking now), how many
-students each AI is answering right now, and its slots. Groq is the main AI and
-the best; backups are also good. Decide which AI should answer this student's
-question. Use your judgement to keep things fair and fast for everyone.
-Only pick an AI that has an open slot.
+BALANCER_PROMPT = """You are the load balancer for a homework tutor app for kids. Your goal: spread
+students EVENLY across the AIs so none of them gets overloaded and every
+student gets a fast answer. There is no limit on students.
+You get live numbers: how many students each AI is answering right now, and
+how many questions each student asked in the last 5 minutes (students are
+anonymous; "this_student" is the one asking now). Groq is the main AI; the
+backups are also good. Send this question to the AI that keeps the load most
+even. Students who ask a lot should go to whichever AI is least busy. If the
+AIs are equally busy, pick Groq. Only pick an AI from the list.
 Reply with JSON only: {"send_to": "<AI name>", "reason": "a few words"}"""
 _balance = {"asks": {}, "log": [], "cf_checks": 0, "cf_rest_until": 0.0}
 
@@ -527,33 +514,45 @@ def _ask_cloudflare(facts):
         return None
 
 
+def _least_busy(backups):
+    """The backup that's less busy than Groq and every other AI, or None
+    (Groq) if Groq is least busy or it's a tie."""
+    best, best_n = None, groq_active_count()
+    for p in backups:
+        n = provider_count(p["name"])
+        if n < best_n:
+            best, best_n = p["name"], n
+    return best
+
+
 def choose_provider(who):
-    """The backup the Cloudflare model picked for this student, or None to
-    stay on Groq."""
-    open_backups = backups_ready(need_room=True)
-    if not open_backups or not _cloudflare_config():
+    """Which backup should answer this student (None = Groq). The Cloudflare
+    model decides; without it, the least busy AI is used."""
+    backups = backups_ready()
+    if not backups:
         return None
     now = time.time()
     with _backup_lock:
         counts = {k: len(v) for k, v in _balance["asks"].items()}
-    if len(counts) < 2:
-        return None  # only one student around — nothing to balance
     others = sorted((c for k, c in counts.items() if k != who), reverse=True)
     mine = counts.get(who, 0)
-    open_names = [p["name"] for p in open_backups]
-    facts = {
-        "this_student_questions_last_5_min": mine,
-        "other_students_questions_last_5_min": others,
-        "ais": [{"name": "Groq", "answering_now": groq_active_count(), "slots": GROQ_LIMIT}] + [
-            {"name": p["name"], "answering_now": provider_count(p["name"]), "slots": p["limit"]}
-            for p in open_backups],
-    }
-    text = _ask_cloudflare(facts)
+    names = [p["name"] for p in backups]
+    text = None
+    if len(counts) >= 2 and _cloudflare_config():
+        facts = {
+            "this_student_questions_last_5_min": mine,
+            "other_students_questions_last_5_min": others,
+            "ais": [{"name": "Groq", "answering_now": groq_active_count()}] + [
+                {"name": p["name"], "answering_now": provider_count(p["name"])} for p in backups],
+        }
+        text = _ask_cloudflare(facts)
     if text is None:
-        return None
+        return _least_busy(backups)  # no AI decision — keep the load even ourselves
     m = re.search(r'"?send_to"?\s*[:=]\s*"([^"]+)"', text)
     pick = m.group(1).strip() if m else ""
-    choice = next((n for n in open_names if n.lower() == pick.lower()), None)
+    choice = next((n for n in names if n.lower() == pick.lower()), None)
+    if choice is None and pick.lower() != "groq":
+        return _least_busy(backups)  # an answer we can't use
     reason_m = re.search(r'"?reason"?\s*[:=]\s*"([^"]{0,80})', text)
     with _backup_lock:
         _balance["log"].append({"who": who, "sendTo": choice or "Groq", "mine": mine,
@@ -4261,10 +4260,7 @@ def chat():
                 # and when Groq is full they always go to one with room.
                 # Students are never told — the answer just arrives.
                 note_question(who_label)
-                pick = None
-                if backups_ready(need_room=True):
-                    pick = (choose_provider(who_label)
-                            or ("full" if groq_active_count() >= GROQ_LIMIT else None))
+                pick = choose_provider(who_label)
                 if pick:
                     name, bfinish = answer_with_backup(payload["messages"], emit, who_label,
                                                        prefer=pick)
@@ -4300,8 +4296,7 @@ def chat():
                                 print(f"[ThinkStep] {attempt_model} busy — answering with {fallback_model} instead.")
                                 continue
                             # Every Groq model is busy — try a backup provider.
-                            name, bfinish = answer_with_backup(payload["messages"], emit,
-                                                               who_label, need_room=False)
+                            name, bfinish = answer_with_backup(payload["messages"], emit, who_label)
                             if name:
                                 backup_used = (name, bfinish)
                                 break
