@@ -295,14 +295,21 @@ BACKUP_PROVIDERS = [
     {"name": "Mistral", "key_env": "MISTRAL_API_KEY", "model_env": "MISTRAL_MODEL",
      "model": "mistral-medium-latest",
      "url": "https://api.mistral.ai/v1/chat/completions"},
+    # Cloudflare Workers AI runs the same gpt-oss-120b as Groq. It shares the
+    # 10,000-neuron daily free allowance with the balancer, so it's ranked
+    # after the others and mostly helps on busy days. Needs the account ID too.
+    {"name": "Cloudflare", "key_env": "CLOUDFLARE_API_TOKEN", "model_env": "CLOUDFLARE_TUTOR_MODEL",
+     "model": "@cf/openai/gpt-oss-120b", "fallback_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+     "needs_env": ["CLOUDFLARE_ACCOUNT_ID"], "url": None},
     {"name": "Gemini", "key_env": "GEMINI_API_KEY", "model_env": "GEMINI_MODEL",
      "model": "gemini-flash-latest",
      "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"},
 ]
 # Best to worst — the balancer prefers better ones when load is close.
 # Groq: gpt-oss-120b, fastest and smartest. OpenRouter: the same model, but
-# its free tier is slower. Mistral: Mistral Medium, very good. Gemini: Flash.
-PROVIDER_RANK = {"Groq": 1, "OpenRouter": 2, "Mistral": 3, "Gemini": 4}
+# its free tier is slower. Mistral: Mistral Medium, very good. Cloudflare:
+# gpt-oss-120b too, but a small daily allowance. Gemini: Flash.
+PROVIDER_RANK = {"Groq": 1, "OpenRouter": 2, "Mistral": 3, "Cloudflare": 4, "Gemini": 5}
 BACKUP_REST_SECONDS = 120
 RECENT_PROVIDER_SECONDS = 15 * 60
 _backup_lock = threading.Lock()
@@ -332,14 +339,24 @@ def _provider_end(name, ticket):
         _backup_state["active"].get(name, {}).pop(ticket, None)
 
 
+def _provider_configured(p):
+    return all((os.environ.get(e) or "").strip() for e in [p["key_env"]] + p.get("needs_env", []))
+
+
+def _provider_url(p):
+    if p["url"]:
+        return p["url"]
+    acct = (os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
+    return f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/v1/chat/completions"
+
+
 def backups_ready():
     """Backups that have a key set and aren't resting after a failure, in order."""
     now = time.time()
     with _backup_lock:
         rest = dict(_backup_state["rest_until"])
     return [p for p in BACKUP_PROVIDERS
-            if (os.environ.get(p["key_env"]) or "").strip()
-            and rest.get(p["name"], 0) <= now]
+            if _provider_configured(p) and rest.get(p["name"], 0) <= now]
 
 
 def backup_status():
@@ -364,7 +381,7 @@ def backup_status():
     for p in BACKUP_PROVIDERS:
         providers.append({
             "name": p["name"],
-            "ready": bool((os.environ.get(p["key_env"]) or "").strip()),
+            "ready": _provider_configured(p),
             "resting": rest.get(p["name"], 0) > now,
             "answers": answers.get(p["name"], 0),
             "now": active.get(p["name"], []),
@@ -391,16 +408,25 @@ def answer_with_backup(messages, emit, who="someone", prefer=None):
     order.sort(key=lambda p: p["name"] != prefer)  # the balancer's pick goes first
     for p in order:
         key = (os.environ.get(p["key_env"]) or "").strip()
-        model = (os.environ.get(p["model_env"]) or "").strip() or p["model"]
+        chosen = (os.environ.get(p["model_env"]) or "").strip()
+        models = [chosen] if chosen else [p["model"]] + ([p["fallback_model"]] if p.get("fallback_model") else [])
         headers = {"Authorization": f"Bearer {key}"}
         if p["name"] == "OpenRouter":
             headers["X-Title"] = "ThinkStep"
-        body = {"model": model, "messages": messages, "stream": True, "max_tokens": 4096}
         got_any = False
         finish = None
         ticket = _provider_start(p["name"], who)
         try:
-            with requests.post(p["url"], headers=headers, json=body, stream=True, timeout=(10, 90)) as r:
+            r = None
+            for model in models:
+                body = {"model": model, "messages": messages, "stream": True, "max_tokens": 4096}
+                r = requests.post(_provider_url(p), headers=headers, json=body, stream=True, timeout=(10, 90))
+                if r.status_code in (400, 404) and model != models[-1]:
+                    print(f"[ThinkStep] Backup {p['name']} can't use {model} ({r.status_code}) — trying {models[-1]}.")
+                    r.close()
+                    continue
+                break
+            with r:
                 if r.status_code != 200:
                     print(f"[ThinkStep] Backup {p['name']} said {r.status_code} — resting it for a bit.")
                     _rest_backup(p["name"])
@@ -426,7 +452,7 @@ def answer_with_backup(messages, emit, who="someone", prefer=None):
                         emit(content)
                         got_any = True
                     finish = choices[0].get("finish_reason") or finish
-        except requests.exceptions.RequestException as e:
+        except Exception as e:  # a network error or an odd reply: never crash the answer
             print(f"[ThinkStep] Backup {p['name']} failed ({type(e).__name__}) — resting it for a bit.")
             _rest_backup(p["name"])
             if got_any:  # part of an answer is already on screen; can't switch now
@@ -495,6 +521,39 @@ def _cloudflare_config():
             token, model)
 
 
+# Second "brain" for the balancer: if Cloudflare isn't set up, is resting,
+# or can't answer, Groq's small, very fast model decides instead. It has its
+# own free daily limit, separate from the big tutor model.
+BALANCER_BACKUP_MODEL = "llama-3.1-8b-instant"
+
+
+def _ask_groq_balancer(facts):
+    key = _load_groq_api_key()
+    if not key or _balance.get("groq_rest_until", 0) > time.time():
+        return None
+    model = (os.environ.get("BALANCER_BACKUP_MODEL") or "").strip() or BALANCER_BACKUP_MODEL
+    try:
+        r = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {key}"}, json={
+            "model": model,
+            "messages": [{"role": "system", "content": BALANCER_PROMPT},
+                         {"role": "user", "content": json.dumps(facts)}],
+            "max_tokens": 120, "temperature": 0,
+        }, timeout=(3, 6))
+        if r.status_code != 200:
+            print(f"[ThinkStep] Balancer backup: Groq said {r.status_code} — using the least busy AI for a bit.")
+            _balance["groq_rest_until"] = time.time() + 120
+            return None
+        with _backup_lock:
+            _balance["groq_checks"] = _balance.get("groq_checks", 0) + 1
+        data = r.json()
+        msg = ((data.get("choices") or [{}])[0].get("message") or {}) if isinstance(data, dict) else {}
+        return str(msg.get("content") or "")
+    except Exception as e:
+        print(f"[ThinkStep] Balancer backup: Groq error ({type(e).__name__}).")
+        _balance["groq_rest_until"] = time.time() + 60
+        return None
+
+
 def _ask_cloudflare(facts):
     """The Cloudflare model's reply text, or None if it couldn't answer."""
     cfg = _cloudflare_config()
@@ -548,7 +607,7 @@ def choose_provider(who):
     mine = counts.get(who, 0)
     names = [p["name"] for p in backups]
     text = None
-    if len(counts) >= 2 and _cloudflare_config():
+    if len(counts) >= 2:
         facts = {
             "this_student_questions_last_5_min": mine,
             "other_students_questions_last_5_min": others,
@@ -557,6 +616,8 @@ def choose_provider(who):
                  "answering_now": provider_count(p["name"])} for p in backups],
         }
         text = _ask_cloudflare(facts)
+        if text is None:
+            text = _ask_groq_balancer(facts)  # the balancer's second brain
     if text is None:
         return _least_busy(backups)  # no AI decision — keep the load even ourselves
     m = re.search(r'"?send_to"?\s*[:=]\s*"([^"]+)"', text)
@@ -580,6 +641,8 @@ def balancer_status():
         log = list(_balance["log"])
     return {"ready": bool(cfg), "model": cfg[2] if cfg else None,
             "resting": _balance["cf_rest_until"] > now, "checks": _balance["cf_checks"],
+            "backupModel": BALANCER_BACKUP_MODEL if _load_groq_api_key() else None,
+            "backupChecks": _balance.get("groq_checks", 0),
             "recent": [{**{k: v for k, v in d.items() if k != "time"},
                         "secondsAgo": int(now - d["time"])} for d in reversed(log)]}
 
@@ -2653,6 +2716,7 @@ def admin_stats():
         "totalSafetyFlags": len(flags),
         "totalErrors24h": _error_counts(_load_errors())[1],
         "guests": guest_visit_stats(),
+        "guestSessions": guest_session_list(),
         "warnings": setup_warnings(),
     })
 
@@ -2818,6 +2882,65 @@ def note_guest_visit(guest_id):
         _guest_seen_today["ids"] = ids
 
 
+# ---- Guest sessions: from what time to what time each guest was online ----
+# The 10-second heartbeat keeps a guest's current session going. A gap of
+# more than 2 minutes starts a new session. Sessions are kept for 7 days and
+# saved at most once a minute per guest (plus whenever one starts or ends),
+# so the heartbeat doesn't write constantly. Guests are only a random ID.
+GUEST_SESSION_GAP = 120
+GUEST_SESSION_KEEP = 7 * 24 * 3600
+_guest_sess = {"data": None, "saved": {}}
+
+
+def _guest_sessions_data():
+    if _guest_sess["data"] is None:
+        raw = STORE.read("guest_sessions.json", {}) or {}
+        _guest_sess["data"] = {k: [list(x) for x in v if isinstance(x, list) and len(x) == 2]
+                               for k, v in raw.items() if isinstance(v, list)}
+    return _guest_sess["data"]
+
+
+def note_guest_session(guest_id, leaving=False):
+    if not guest_id:
+        return
+    now = time.time()
+    with _guest_days_lock:
+        data = _guest_sessions_data()
+        sess = data.setdefault(guest_id, [])
+        started = False
+        if sess and now - sess[-1][1] <= GUEST_SESSION_GAP:
+            sess[-1][1] = now
+        elif leaving:
+            return
+        else:
+            sess.append([now, now])
+            started = True
+        # save when a visit starts or ends, otherwise at most every 30 seconds
+        # in total (not per guest), so lots of guests don't mean lots of writes
+        if started or leaving or now - _guest_sess["saved"].get("*", 0) >= 30:
+            for gid in list(data):
+                data[gid] = [x for x in data[gid] if now - x[1] < GUEST_SESSION_KEEP]
+                if not data[gid]:
+                    del data[gid]
+            STORE.write("guest_sessions.json", data)
+            _guest_sess["saved"]["*"] = now
+
+
+def guest_session_list(limit=60):
+    """Newest first: [{guest, start, end, online}] for the last 7 days."""
+    now = time.time()
+    with _guest_days_lock:
+        data = {k: [list(x) for x in v] for k, v in _guest_sessions_data().items()}
+    rows = []
+    for gid, sess in data.items():
+        for start, end in sess:
+            if now - end < GUEST_SESSION_KEEP:
+                rows.append({"guest": gid[:6], "start": int(start * 1000), "end": int(end * 1000),
+                             "online": now - end <= ONLINE_WINDOW_SECONDS})
+    rows.sort(key=lambda r: r["start"], reverse=True)
+    return rows[:limit]
+
+
 def guest_visit_stats():
     """Different guests in the last 7 days (today included), plus each day."""
     data = STORE.read("guest_days.json", {}) or {}
@@ -2844,6 +2967,8 @@ def heartbeat():
         if presence_key:
             with _presence_lock:
                 _presence.pop(presence_key, None)
+            if presence_key.startswith("guest:") and not user:
+                note_guest_session(presence_key[6:], leaving=True)
         return jsonify({"ok": True})
     guest_id, is_new = (None, False) if user else get_or_create_guest_id()
 
@@ -2854,6 +2979,7 @@ def heartbeat():
     else:
         _touch_presence(f"guest:{guest_id}", "guest")
         note_guest_visit(guest_id)
+        note_guest_session(guest_id)
 
     resp = jsonify({"ok": True})
     if not user:
