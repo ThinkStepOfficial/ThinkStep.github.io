@@ -2652,6 +2652,7 @@ def admin_stats():
         "avgRating": avg_rating,
         "totalSafetyFlags": len(flags),
         "totalErrors24h": _error_counts(_load_errors())[1],
+        "guests": guest_visit_stats(),
         "warnings": setup_warnings(),
     })
 
@@ -2789,6 +2790,47 @@ def server_error(e):
     return "Something went wrong on our side.", 500
 
 
+# ---- Guest visits, for the admin page ("guests in the last 7 days") ----
+# Each day keeps the list of guest IDs (the random cookie, nothing personal)
+# that opened ThinkStep that day. Only the last 8 days are kept. A guest is
+# written down once per day, so the 10-second heartbeat doesn't write often.
+GUEST_DAYS_KEPT = 8
+_guest_days_lock = threading.Lock()
+_guest_seen_today = {"date": None, "ids": set()}
+
+
+def note_guest_visit(guest_id):
+    if not guest_id:
+        return
+    today = datetime.now(timezone.utc).date().isoformat()
+    with _guest_days_lock:
+        if _guest_seen_today["date"] != today:
+            _guest_seen_today["date"], _guest_seen_today["ids"] = today, set()
+        if guest_id in _guest_seen_today["ids"]:
+            return
+        data = STORE.read("guest_days.json", {}) or {}
+        ids = set(data.get(today) or [])
+        ids.add(guest_id)
+        data[today] = sorted(ids)
+        for day in sorted(data)[:-GUEST_DAYS_KEPT]:
+            del data[day]
+        STORE.write("guest_days.json", data)
+        _guest_seen_today["ids"] = ids
+
+
+def guest_visit_stats():
+    """Different guests in the last 7 days (today included), plus each day."""
+    data = STORE.read("guest_days.json", {}) or {}
+    today = datetime.now(timezone.utc).date()
+    days, everyone = [], set()
+    for back in range(6, -1, -1):
+        day = (today - timedelta(days=back)).isoformat()
+        ids = set(data.get(day) or [])
+        everyone |= ids
+        days.append({"date": day, "guests": len(ids)})
+    return {"last7Days": len(everyone), "today": days[-1]["guests"], "days": days}
+
+
 @app.route("/api/heartbeat", methods=["POST"])
 def heartbeat():
     """Called periodically by the frontend while a tab is open, so the
@@ -2811,6 +2853,7 @@ def heartbeat():
         _touch_account_last_seen(key)
     else:
         _touch_presence(f"guest:{guest_id}", "guest")
+        note_guest_visit(guest_id)
 
     resp = jsonify({"ok": True})
     if not user:
