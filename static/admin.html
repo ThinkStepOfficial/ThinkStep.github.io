@@ -302,6 +302,11 @@
     </div>
 
     <div class="list-card" style="margin-top:16px;">
+      <h2>Guest visits <span style="font-weight:400;color:var(--muted);font-size:12.5px;">(last 7 days, your time)</span></h2>
+      <div id="guestSessionsList"><div class="empty-note">Loading…</div></div>
+    </div>
+
+    <div class="list-card" style="margin-top:16px;">
       <h2>AI providers</h2>
       <div id="providersList"><div class="empty-note">Loading…</div></div>
     </div>
@@ -426,6 +431,18 @@ async function fetchStats() {
     if (!res.ok) return;
     const data = await res.json();
     totalAccountsEl.textContent = data.totalAccounts;
+    const gsEl = document.getElementById('guestSessionsList');
+    if (gsEl && data.guestSessions) {
+      const rows = data.guestSessions;
+      const tm = ms => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+      const dy = ms => new Date(ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      const len = (a, b) => { const m = Math.max(1, Math.round((b - a) / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+      gsEl.innerHTML = rows.length ? rows.map(r => `<div class="flag-row">
+          <span class="flag-who">${r.online ? '🟢' : '⚪'} Guest ${escapeHtml(r.guest)}</span>
+          <span class="flag-time">${escapeHtml(dy(r.start))} · ${escapeHtml(tm(r.start))} – ${r.online ? 'now' : escapeHtml(tm(r.end))}
+            (${escapeHtml(len(r.start, r.end))})</span></div>`).join('')
+        : '<div class="empty-note">No guest visits yet.</div>';
+    }
     if (data.guests) {
       const g = data.guests, box = document.getElementById('guests7');
       box.textContent = g.last7Days;
@@ -505,8 +522,9 @@ async function fetchErrors() {
       }).join('');
       const bal = data.balancer;
       if (bal) {
-        const bState = !bal.ready ? 'no Cloudflare key — sending kids to the least busy AI'
-          : bal.resting ? 'Cloudflare resting — sending kids to the least busy AI'
+        const backup = bal.backupModel ? `Groq ${escapeHtml(bal.backupModel)} is deciding instead` : 'sending kids to the least busy AI';
+        const bState = !bal.ready ? 'no Cloudflare key — ' + backup
+          : bal.resting ? 'Cloudflare resting — ' + backup
           : `ready (${escapeHtml(bal.model || '')})`;
         const decisions = bal.recent.length
           ? bal.recent.slice(0, 8).map(d => `<div style="font-size:12.5px;">
@@ -516,7 +534,7 @@ async function fetchErrors() {
           : '<div style="font-size:12.5px;color:var(--muted);">No decisions yet — it decides when 2+ kids are on at once.</div>';
         pvEl.innerHTML += `<div class="flag-row" style="display:block;">
           <div><span class="flag-who">Cloudflare balancer</span>
-            <span class="flag-time">${bState} · ${bal.checks} decisions since restart</span></div>
+            <span class="flag-time">${bState} · ${bal.checks} Cloudflare + ${bal.backupChecks || 0} Groq decisions since restart</span></div>
           <div style="margin-top:4px;">${decisions}</div></div>`;
       }
     }

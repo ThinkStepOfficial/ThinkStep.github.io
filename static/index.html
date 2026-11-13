@@ -2761,7 +2761,9 @@ function uiDialog({ icon = '', title = '', text = '', ok = 'OK', cancel = 'Cance
   setTimeout(() => (password ? input : okBtn).focus(), 50);
   return new Promise(resolve => {
     uiDialogDone = (v) => { uiDialogDone = null; uiDialogEl.classList.remove('open'); resolve(v); };
+    const done = uiDialogDone;
     uiDialogEl._submit = async () => {
+      if (uiDialogDone !== done || okBtn.disabled) return;  // already closed, or still checking (double tap)
       const value = password ? input.value : true;
       if (password && !value) { err.textContent = 'Please type your password.'; err.classList.add('show'); return; }
       if (onSubmit) {
@@ -2770,9 +2772,9 @@ function uiDialog({ icon = '', title = '', text = '', ok = 'OK', cancel = 'Cance
         okBtn.disabled = false;
         if (problem) { err.textContent = problem; err.classList.add('show'); input.value = ''; input.focus(); return; }
       }
-      uiDialogDone(value);
+      if (uiDialogDone === done) done(value);
     };
-    uiDialogEl._cancel = () => uiDialogDone(password ? null : false);
+    uiDialogEl._cancel = () => { if (uiDialogDone === done && !okBtn.disabled) done(password ? null : false); };
   });
 }
 function uiAlert(title, text = '', icon = 'ℹ️') { return uiDialog({ icon, title, text, cancel: '' }); }
