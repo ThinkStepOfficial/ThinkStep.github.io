@@ -263,6 +263,11 @@
     <div id="setupWarnings"><h2>⚠️ Something needs setting up</h2><ul id="setupWarningsList"></ul></div>
 
     <div class="stat-row" style="margin-top:22px;">
+      <div class="stat-box" title="">
+        <div class="num" id="guests7">–</div>
+        <div class="label">guests (last 7 days)</div>
+        <div class="label" id="guestsToday" style="margin-top:2px;"></div>
+      </div>
       <div class="stat-box">
         <div class="num" id="totalAccounts">–</div>
         <div class="label">total accounts</div>
@@ -421,6 +426,14 @@ async function fetchStats() {
     if (!res.ok) return;
     const data = await res.json();
     totalAccountsEl.textContent = data.totalAccounts;
+    if (data.guests) {
+      const g = data.guests, box = document.getElementById('guests7');
+      box.textContent = g.last7Days;
+      document.getElementById('guestsToday').textContent = `${g.today} today`;
+      box.parentElement.title = g.days.map(d =>
+        new Date(d.date + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+        + ': ' + d.guests).join('\n');
+    }
     totalFeedbackEl.textContent = data.totalFeedback;
     avgRatingEl.textContent = data.avgRating != null ? data.avgRating : '–';
     totalSafetyFlagsEl.textContent = data.totalSafetyFlags;
