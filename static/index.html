@@ -1247,6 +1247,20 @@
   .emoji-grid button.on { border-color: var(--primary); background: var(--primary-light); }
   .emoji-grid button.locked { filter: grayscale(1); opacity: .35; cursor: not-allowed; }
   .emoji-tier { font-size: 12.5px; color: var(--muted); margin: 10px 0 -4px; }
+  /* ThinkStep's own pop-up box (instead of the browser's plain alert/confirm/prompt) */
+  #uiDialog { display: none; position: fixed; inset: 0; background: rgba(20, 30, 60, 0.45); z-index: 120;
+              align-items: center; justify-content: center; padding: 16px; }
+  #uiDialog.open { display: flex; }
+  #uiDialog .account-modal { max-width: 400px; width: 100%; animation: msgIn .18s var(--ease); }
+  #uiDialog .ui-icon { font-size: 34px; text-align: center; margin-bottom: 4px; }
+  #uiDialog h2 { text-align: center; }
+  #uiDialog .sub { text-align: center; white-space: pre-line; }
+  #uiDialog .ui-row { display: flex; gap: 10px; margin-top: 16px; }
+  #uiDialog .ui-row button { flex: 1; min-height: 44px; }
+  #uiDialog .ui-row .secondary { background: var(--card); color: var(--primary-dark); border: 1px solid var(--border); }
+  #uiDialog .ui-row .danger { background: #d64545; }
+  #uiDialog .ui-row .danger:hover { background: #b83636; }
+  #uiDialog input { width: 100%; margin-top: 12px; }
   #avatarOverlay { display: none; position: fixed; inset: 0; background: rgba(20, 30, 60, 0.45); z-index: 105;
                    align-items: center; justify-content: center; padding: 16px; }
   #avatarOverlay.open { display: flex; }
@@ -1516,6 +1530,22 @@
       <button type="submit" class="submit-btn" id="emailSaveBtn">Save</button>
     </form>
     <div class="switch-mode"><button type="button" id="emailLater">Not now</button></div>
+  </div>
+</div>
+
+<div id="uiDialog" role="dialog" aria-modal="true" aria-labelledby="uiTitle">
+  <div class="account-modal">
+    <div class="ui-icon" id="uiIcon"></div>
+    <h2 id="uiTitle"></h2>
+    <div class="sub" id="uiText"></div>
+    <form id="uiForm">
+      <input id="uiInput" type="password" autocomplete="current-password" style="display:none" />
+      <div class="error-msg" id="uiError"></div>
+      <div class="ui-row">
+        <button type="button" class="secondary" id="uiCancel">Cancel</button>
+        <button type="submit" id="uiOk">OK</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -2624,7 +2654,7 @@ accountForm.addEventListener('submit', async (e) => {
       const msg = result.emailed
         ? `We've sent an email to ${result.parentEmail} asking a parent or guardian to approve ${result.name}'s account. Once they click the link, ${result.name} can log in!`
         : `${result.name}'s account was created, but we couldn't send the approval email to ${result.parentEmail} right now. Ask a grown-up to check the app's setup, or try signing up again later.`;
-      alert(msg);
+      uiAlert(result.emailed ? 'Almost there!' : 'Account created', msg, result.emailed ? '📧' : '⚠️');
       return;
     }
     currentUser = userFromServer(result);
@@ -2704,32 +2734,83 @@ forgotPasswordForm.addEventListener('submit', async (e) => {
   }
 });
 
+/* ---------- ThinkStep's own pop-up box ----------
+   uiDialog({ icon, title, text, ok, cancel, danger, password, onSubmit })
+   Resolves to true / false, or (with password) the typed password / null.
+   onSubmit(value) can return an error message to keep the box open. */
+const uiDialogEl = document.getElementById('uiDialog');
+let uiDialogDone = null;
+function uiDialog({ icon = '', title = '', text = '', ok = 'OK', cancel = 'Cancel', danger = false,
+                    password = false, placeholder = '', onSubmit = null } = {}) {
+  if (uiDialogDone) uiDialogDone(password ? null : false);
+  const input = document.getElementById('uiInput'), err = document.getElementById('uiError');
+  const okBtn = document.getElementById('uiOk'), cancelBtn = document.getElementById('uiCancel');
+  document.getElementById('uiIcon').textContent = icon;
+  document.getElementById('uiTitle').textContent = title;
+  document.getElementById('uiText').textContent = text;
+  okBtn.textContent = ok;
+  okBtn.className = danger ? 'danger' : '';
+  okBtn.disabled = false;
+  cancelBtn.style.display = cancel ? '' : 'none';
+  cancelBtn.textContent = cancel || '';
+  input.style.display = password ? '' : 'none';
+  input.value = '';
+  input.placeholder = placeholder;
+  err.classList.remove('show');
+  uiDialogEl.classList.add('open');
+  setTimeout(() => (password ? input : okBtn).focus(), 50);
+  return new Promise(resolve => {
+    uiDialogDone = (v) => { uiDialogDone = null; uiDialogEl.classList.remove('open'); resolve(v); };
+    uiDialogEl._submit = async () => {
+      const value = password ? input.value : true;
+      if (password && !value) { err.textContent = 'Please type your password.'; err.classList.add('show'); return; }
+      if (onSubmit) {
+        okBtn.disabled = true;
+        const problem = await onSubmit(value);
+        okBtn.disabled = false;
+        if (problem) { err.textContent = problem; err.classList.add('show'); input.value = ''; input.focus(); return; }
+      }
+      uiDialogDone(value);
+    };
+    uiDialogEl._cancel = () => uiDialogDone(password ? null : false);
+  });
+}
+function uiAlert(title, text = '', icon = 'ℹ️') { return uiDialog({ icon, title, text, cancel: '' }); }
+document.getElementById('uiForm').addEventListener('submit', (e) => { e.preventDefault(); uiDialogEl._submit && uiDialogEl._submit(); });
+document.getElementById('uiCancel').addEventListener('click', () => uiDialogEl._cancel && uiDialogEl._cancel());
+uiDialogEl.addEventListener('click', (e) => { if (e.target === uiDialogEl && uiDialogEl._cancel) uiDialogEl._cancel(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && uiDialogEl.classList.contains('open') && uiDialogEl._cancel) uiDialogEl._cancel(); });
+
 /* ---------- Delete account ---------- */
 async function deleteAccountFlow() {
-  const sure = confirm(`Delete ${currentUser ? currentUser.name : 'this'}'s ThinkStep account? This can't be undone — chat progress and account info will be permanently removed.`);
+  const name = currentUser ? currentUser.name : 'this';
+  const sure = await uiDialog({
+    icon: '⚠️', title: 'Delete your account?', danger: true, ok: 'Yes, continue',
+    text: `This deletes ${name}'s ThinkStep account forever. Your progress and account info will be permanently removed, and it can't be undone.`,
+  });
   if (!sure) return;
-  const password = prompt('Please re-enter your password to confirm:');
-  if (password === null) return;
-  try {
-    const res = await fetch('/api/delete-account', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    });
-    const result = await res.json();
-    if (!res.ok) {
-      alert(result.error || 'Something went wrong deleting the account.');
-      return;
-    }
-    clearPersonalData(ownerFor(currentUser));  // wipe this account's chats from this computer too
-    currentUser = null;
-    switchStorageOwner(null);
-    renderAccountStatus();
-    renderFormulaSheet('');
-    alert('Account deleted.');
-  } catch (err) {
-    alert("Couldn't reach the server — is it running?");
-  }
+  const done = await uiDialog({
+    icon: '🔒', title: 'Type your password', danger: true, ok: 'Delete my account', password: true,
+    placeholder: 'Your password',
+    text: 'To make sure it\'s really you, type your password one more time.',
+    onSubmit: async (password) => {
+      try {
+        const res = await fetch('/api/delete-account', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }),
+        });
+        const result = await res.json().catch(() => ({}));
+        return res.ok ? null : (result.error || 'Something went wrong deleting the account.');
+      } catch { return "Couldn't reach ThinkStep — check your internet and try again."; }
+    },
+  });
+  if (done === null) return;
+  clearPersonalData(ownerFor(currentUser));  // wipe this account's chats from this computer too
+  currentUser = null;
+  switchStorageOwner(null);
+  renderAccountStatus();
+  renderFormulaSheet('');
+  try { updateEmailUI(); } catch {}
+  uiAlert('Account deleted', 'Your account and its info have been removed. Thanks for learning with ThinkStep!', '👋');
 }
 
 function renderAccountStatus() {
@@ -2961,9 +3042,10 @@ function renderChatList() {
       renderMessages();
       if (typeof closeDrawers === 'function') closeDrawers();
     });
-    li.querySelector('.del').addEventListener('click', (e) => {
+    li.querySelector('.del').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (c.messages.length && !confirm(`Delete the chat "${c.title}"?`)) return;
+      if (c.messages.length && !(await uiDialog({ icon: '🗑️', title: 'Delete this chat?', danger: true, ok: 'Delete',
+          text: `"${c.title}" will be deleted from this device.` }))) return;
       chats = chats.filter(x => x.id !== c.id);
       if (chats.length === 0) {
         const nc = newChatObj();
@@ -3256,7 +3338,7 @@ function renderProgress() {
 document.getElementById('exportBtn').addEventListener('click', () => {
   const active = getActive();
   if (!active.messages.length) {
-    alert('This chat is empty — ask a question first, then you can save a summary.');
+    uiAlert('Nothing to save yet', 'This chat is empty — ask a question first, then you can save a summary.', '📝');
     return;
   }
   let text = `ThinkStep Chat Summary\n`;
