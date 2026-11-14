@@ -281,7 +281,7 @@ RATE_LIMIT_FALLBACK = {"openai/gpt-oss-120b": "openai/gpt-oss-20b"}
 
 # ---- AI providers: Groq + backups, no limit on students ----
 # There's no cap on how many students can use ThinkStep at once. Every
-# question goes to Groq, OpenRouter or Mistral (or Gemini, if a key is set),
+# question goes to Groq, OpenRouter, Mistral or Cloudflare,
 # and the Cloudflare balancer (below) spreads students out so no AI gets
 # overloaded. A backup is also tried if Groq says "busy" (429).
 # A backup is only used if its key is set on Render (Environment tab).
@@ -301,15 +301,12 @@ BACKUP_PROVIDERS = [
     {"name": "Cloudflare", "key_env": "CLOUDFLARE_API_TOKEN", "model_env": "CLOUDFLARE_TUTOR_MODEL",
      "model": "@cf/openai/gpt-oss-120b", "fallback_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
      "needs_env": ["CLOUDFLARE_ACCOUNT_ID"], "url": None},
-    {"name": "Gemini", "key_env": "GEMINI_API_KEY", "model_env": "GEMINI_MODEL",
-     "model": "gemini-flash-latest",
-     "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"},
 ]
 # Best to worst — the balancer prefers better ones when load is close.
 # Groq: gpt-oss-120b, fastest and smartest. OpenRouter: the same model, but
 # its free tier is slower. Mistral: Mistral Medium, very good. Cloudflare:
-# gpt-oss-120b too, but a small daily allowance. Gemini: Flash.
-PROVIDER_RANK = {"Groq": 1, "OpenRouter": 2, "Mistral": 3, "Cloudflare": 4, "Gemini": 5}
+# gpt-oss-120b too, but a small daily allowance.
+PROVIDER_RANK = {"Groq": 1, "OpenRouter": 2, "Mistral": 3, "Cloudflare": 4}
 BACKUP_REST_SECONDS = 120
 RECENT_PROVIDER_SECONDS = 15 * 60
 _backup_lock = threading.Lock()
@@ -375,12 +372,14 @@ def backup_status():
         rows = sorted(((t, who) for who, (p, t) in recent.items() if p == name), reverse=True)
         return [{"who": who, "secondsAgo": int(now - t)} for t, who in rows]
 
-    providers = [{"name": "Groq", "ready": True, "resting": False,
+    providers = [{"name": "Groq", "ready": True, "resting": False, "rank": 1, "model": TUTOR_MODEL,
                   "answers": answers.get("Groq", 0), "now": active.get("Groq", []),
                   "recent": recent_for("Groq")}]
     for p in BACKUP_PROVIDERS:
         providers.append({
             "name": p["name"],
+            "rank": PROVIDER_RANK.get(p["name"]),
+            "model": (os.environ.get(p["model_env"]) or "").strip() or p["model"],
             "ready": _provider_configured(p),
             "resting": rest.get(p["name"], 0) > now,
             "answers": answers.get(p["name"], 0),
