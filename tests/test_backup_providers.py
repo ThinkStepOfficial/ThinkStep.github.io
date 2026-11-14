@@ -134,9 +134,9 @@ def test_switch_is_silent(app_module, client, setup, monkeypatch):
 def test_groq_429_everywhere_falls_to_backup(app_module, client, setup, monkeypatch):
     calls, behaviour = setup
     behaviour["groq"] = 429
-    monkeypatch.setenv("GEMINI_API_KEY", "z")
+    monkeypatch.setenv("MISTRAL_API_KEY", "z")
     assert "backup answer" in _ask(client)
-    assert "generativelanguage" in _urls(calls)[-1]
+    assert "mistral.ai" in _urls(calls)[-1]
 
 
 def test_failing_backup_rests_and_groq_answers(app_module, client, setup, monkeypatch):
@@ -233,7 +233,7 @@ def test_cloudflare_broken_means_least_busy(app_module, client, setup, monkeypat
 
 def test_cloudflare_knows_groq_is_best_then_the_order(app_module, setup, monkeypatch):
     calls, behaviour = setup
-    for k in ("OPENROUTER_API_KEY", "MISTRAL_API_KEY", "GEMINI_API_KEY"):
+    for k in ("OPENROUTER_API_KEY", "MISTRAL_API_KEY"):
         monkeypatch.setenv(k, "x")
     _cloudflare_on(monkeypatch, behaviour, '{"send_to": "Groq"}')
     _others(app_module)
@@ -242,7 +242,7 @@ def test_cloudflare_knows_groq_is_best_then_the_order(app_module, setup, monkeyp
     url, body = calls[0]
     ais = _json.loads(body["messages"][1]["content"])["ais"]
     assert [(a["name"], a["quality_rank"]) for a in ais] == [
-        ("Groq", 1), ("OpenRouter", 2), ("Mistral", 3), ("Cloudflare", 4), ("Gemini", 5)]
+        ("Groq", 1), ("OpenRouter", 2), ("Mistral", 3), ("Cloudflare", 4)]
     assert "Groq is the best" in body["messages"][0]["content"]
 
 
@@ -332,3 +332,13 @@ def test_groq_small_model_decides_without_cloudflare_keys(app_module, setup, mon
     _others(app_module)
     app_module.note_question("me")
     assert app_module.choose_provider("me") == "Mistral"
+
+
+
+def test_gemini_is_gone_and_admin_shows_model_and_rank(app_module, setup):
+    names = [p["name"] for p in app_module.BACKUP_PROVIDERS]
+    assert "Gemini" not in names
+    st = {p["name"]: p for p in app_module.backup_status()["providers"]}
+    assert set(st) == {"Groq", "OpenRouter", "Mistral", "Cloudflare"}
+    assert st["Groq"]["rank"] == 1 and st["Groq"]["model"] == app_module.TUTOR_MODEL
+    assert st["Cloudflare"]["model"] == "@cf/openai/gpt-oss-120b"
