@@ -282,7 +282,7 @@ RATE_LIMIT_FALLBACK = {"openai/gpt-oss-120b": "openai/gpt-oss-20b"}
 # ---- AI providers: Groq + backups, no limit on students ----
 # There's no cap on how many students can use ThinkStep at once. Every
 # question goes to Groq, OpenRouter, Mistral or Cloudflare,
-# and the Cloudflare balancer (below) spreads students out so no AI gets
+# and the balancer (Groq's small model, below) spreads students out so no AI gets
 # overloaded. A backup is also tried if Groq says "busy" (429).
 # A backup is only used if its key is set on Render (Environment tab).
 # Students are never told which AI answered — the answer just arrives.
@@ -295,9 +295,9 @@ BACKUP_PROVIDERS = [
     {"name": "Mistral", "key_env": "MISTRAL_API_KEY", "model_env": "MISTRAL_MODEL",
      "model": "mistral-medium-latest",
      "url": "https://api.mistral.ai/v1/chat/completions"},
-    # Cloudflare Workers AI runs the same gpt-oss-120b as Groq. It shares the
-    # 10,000-neuron daily free allowance with the balancer, so it's ranked
-    # after the others and mostly helps on busy days. Needs the account ID too.
+    # Cloudflare Workers AI runs the same gpt-oss-120b as Groq. Its free
+    # allowance is 10,000 neurons a day, so it's ranked after the others and
+    # mostly helps on busy days. Needs the account ID too.
     {"name": "Cloudflare", "key_env": "CLOUDFLARE_API_TOKEN", "model_env": "CLOUDFLARE_TUTOR_MODEL",
      "model": "@cf/openai/gpt-oss-120b", "fallback_model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
      "needs_env": ["CLOUDFLARE_ACCOUNT_ID"], "url": None},
@@ -468,18 +468,19 @@ def answer_with_backup(messages, emit, who="someone", prefer=None):
     return None, None
 
 
-# ---- Load balancer: a small Cloudflare AI spreads students evenly ----
+# ---- Load balancer: a small Groq AI spreads students evenly ----
 # Whenever more than one student is using ThinkStep and a backup AI is
-# ready, a small Cloudflare model looks at the numbers — how many questions
-# each student asked lately and how many students each AI is answering right
-# now — and DECIDES which AI should answer this question, so the work is
-# spread evenly and nobody waits. There are no slot limits.
-# It only ever sees numbers, never names or questions.
-# If Cloudflare isn't set up or doesn't answer, the question goes to
-# whichever AI is least busy right now (Groq if it's a tie).
-# Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN on Render to turn it on.
+# ready, Groq's small, very fast model looks at the numbers — how many
+# questions each student asked lately and how many students each AI is
+# answering right now — and DECIDES which AI should answer this question, so
+# the work is spread evenly and nobody waits. There are no slot limits.
+# It only ever sees numbers, never names or questions. It has its own free
+# daily limit, separate from the big tutor model.
+# (Cloudflare used to be the balancer; now it only answers kids, as a tutor.)
+# If Groq's small model can't answer, the question goes to whichever AI is
+# least busy right now (Groq if it's a tie).
 BALANCE_WINDOW = 5 * 60          # it sees the last 5 minutes of questions
-CLOUDFLARE_DEFAULT_MODEL = "@cf/openai/gpt-oss-20b"
+BALANCER_MODEL = "llama-3.1-8b-instant"
 BALANCER_PROMPT = """You are the load balancer for a homework tutor app for kids. Your goal: spread
 students EVENLY across the AIs so none of them gets overloaded and every
 student gets a fast answer. There is no limit on students.
@@ -496,7 +497,7 @@ Mistral also checks students' profile pictures; that work is already included
 in its "answering_now" count, so treat it as real load.
 Only pick an AI from the list.
 Reply with JSON only: {"send_to": "<AI name>", "reason": "a few words"}"""
-_balance = {"asks": {}, "log": [], "cf_checks": 0, "cf_rest_until": 0.0}
+_balance = {"asks": {}, "log": [], "checks": 0, "rest_until": 0.0}
 
 
 def note_question(who):
@@ -510,75 +511,35 @@ def note_question(who):
             del _balance["asks"][k]
 
 
-def _cloudflare_config():
-    acct = (os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
-    token = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
-    if not acct or not token:
-        return None
-    model = (os.environ.get("CLOUDFLARE_MODEL") or "").strip() or CLOUDFLARE_DEFAULT_MODEL
-    return (f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/v1/chat/completions",
-            token, model)
-
-
-# Second "brain" for the balancer: if Cloudflare isn't set up, is resting,
-# or can't answer, Groq's small, very fast model decides instead. It has its
-# own free daily limit, separate from the big tutor model.
-BALANCER_BACKUP_MODEL = "llama-3.1-8b-instant"
+def _balancer_model():
+    return (os.environ.get("BALANCER_MODEL") or os.environ.get("BALANCER_BACKUP_MODEL") or "").strip() \
+        or BALANCER_MODEL
 
 
 def _ask_groq_balancer(facts):
+    """Groq's small model's reply text, or None if it couldn't answer."""
     key = _load_groq_api_key()
-    if not key or _balance.get("groq_rest_until", 0) > time.time():
+    if not key or _balance["rest_until"] > time.time():
         return None
-    model = (os.environ.get("BALANCER_BACKUP_MODEL") or "").strip() or BALANCER_BACKUP_MODEL
     try:
         r = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {key}"}, json={
-            "model": model,
+            "model": _balancer_model(),
             "messages": [{"role": "system", "content": BALANCER_PROMPT},
                          {"role": "user", "content": json.dumps(facts)}],
             "max_tokens": 120, "temperature": 0,
         }, timeout=(3, 6))
         if r.status_code != 200:
-            print(f"[ThinkStep] Balancer backup: Groq said {r.status_code} — using the least busy AI for a bit.")
-            _balance["groq_rest_until"] = time.time() + 120
+            print(f"[ThinkStep] Balancer: Groq said {r.status_code} — using the least busy AI for a bit.")
+            _balance["rest_until"] = time.time() + 120
             return None
-        with _backup_lock:
-            _balance["groq_checks"] = _balance.get("groq_checks", 0) + 1
         data = r.json()
+        with _backup_lock:
+            _balance["checks"] += 1
         msg = ((data.get("choices") or [{}])[0].get("message") or {}) if isinstance(data, dict) else {}
         return str(msg.get("content") or "")
     except Exception as e:
-        print(f"[ThinkStep] Balancer backup: Groq error ({type(e).__name__}).")
-        _balance["groq_rest_until"] = time.time() + 60
-        return None
-
-
-def _ask_cloudflare(facts):
-    """The Cloudflare model's reply text, or None if it couldn't answer."""
-    cfg = _cloudflare_config()
-    if not cfg or _balance["cf_rest_until"] > time.time():
-        return None
-    url, token, model = cfg
-    try:
-        r = requests.post(url, headers={"Authorization": f"Bearer {token}"}, json={
-            "model": model,
-            "messages": [{"role": "system", "content": BALANCER_PROMPT},
-                         {"role": "user", "content": json.dumps(facts)}],
-            "max_tokens": 300,
-            "temperature": 0,
-        }, timeout=(3, 6))
-        if r.status_code != 200:
-            print(f"[ThinkStep] Balancer: Cloudflare said {r.status_code} — keeping students on Groq for a bit.")
-            _balance["cf_rest_until"] = time.time() + 120
-            return None
-        with _backup_lock:
-            _balance["cf_checks"] += 1
-        data = r.json()
-        msg = ((data.get("choices") or [{}])[0].get("message") or {}) if isinstance(data, dict) else {}
-        return str(msg.get("content") or "")
-    except Exception as e:
-        print(f"[ThinkStep] Balancer: Cloudflare error ({type(e).__name__}) — keeping students on Groq.")
-        _balance["cf_rest_until"] = time.time() + 60
+        print(f"[ThinkStep] Balancer: Groq error ({type(e).__name__}) — using the least busy AI.")
+        _balance["rest_until"] = time.time() + 60
         return None
 
 
@@ -594,7 +555,7 @@ def _least_busy(backups):
 
 
 def choose_provider(who):
-    """Which backup should answer this student (None = Groq). The Cloudflare
+    """Which backup should answer this student (None = Groq). Groq's small
     model decides; without it, the least busy AI is used."""
     backups = backups_ready()
     if not backups:
@@ -614,9 +575,7 @@ def choose_provider(who):
                 {"name": p["name"], "quality_rank": PROVIDER_RANK[p["name"]],
                  "answering_now": provider_count(p["name"])} for p in backups],
         }
-        text = _ask_cloudflare(facts)
-        if text is None:
-            text = _ask_groq_balancer(facts)  # the balancer's second brain
+        text = _ask_groq_balancer(facts)
     if text is None:
         return _least_busy(backups)  # no AI decision — keep the load even ourselves
     m = re.search(r'"?send_to"?\s*[:=]\s*"([^"]+)"', text)
@@ -634,14 +593,11 @@ def choose_provider(who):
 
 
 def balancer_status():
-    cfg = _cloudflare_config()
     now = time.time()
     with _backup_lock:
         log = list(_balance["log"])
-    return {"ready": bool(cfg), "model": cfg[2] if cfg else None,
-            "resting": _balance["cf_rest_until"] > now, "checks": _balance["cf_checks"],
-            "backupModel": BALANCER_BACKUP_MODEL if _load_groq_api_key() else None,
-            "backupChecks": _balance.get("groq_checks", 0),
+    return {"ready": bool(_load_groq_api_key()), "provider": "Groq", "model": _balancer_model(),
+            "resting": _balance["rest_until"] > now, "checks": _balance["checks"],
             "recent": [{**{k: v for k, v in d.items() if k != "time"},
                         "secondsAgo": int(now - d["time"])} for d in reversed(log)]}
 
@@ -4065,7 +4021,7 @@ def _tts_unavailable(reason, status=503):
 # earned by leveling up, so uploading a picture of a locked emoji doesn't
 # count. Mistral checks it first (Groq's vision models if Mistral is busy).
 # The picture is never saved on the server; it stays on the student's device.
-# While Mistral checks, it counts as busy, so the Cloudflare balancer sees
+# While Mistral checks, it counts as busy, so the balancer sees
 # that and sends tutoring to other AIs.
 # ============================================================
 AVATAR_MAX_DATA_URL_CHARS = 200_000     # the page shrinks pictures to 160x160
@@ -4576,7 +4532,7 @@ def chat():
                 answer_parts.append(text)
 
             try:
-                # The Cloudflare balancer may send this student to a backup,
+                # The balancer may send this student to a backup,
                 # and when Groq is full they always go to one with room.
                 # Students are never told — the answer just arrives.
                 note_question(who_label)
