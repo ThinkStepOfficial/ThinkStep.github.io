@@ -129,6 +129,9 @@ def relax_spam_limits(module):
         getattr(module, name).limit = 10_000
     module._real_guest_daily_limit = module.GUEST_DAILY_LIMIT_PER_VISITOR
     module.GUEST_DAILY_LIMIT_PER_VISITOR = 10_000
+    # Guests only get 5 questions; most tests chat more than that.
+    module._real_guest_question_limit = module.GUEST_QUESTION_LIMIT
+    module.GUEST_QUESTION_LIMIT = 10_000
 
 
 def real_spam_limits(module):
