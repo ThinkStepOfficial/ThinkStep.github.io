@@ -247,8 +247,8 @@
         when lots of students are using it, some questions are answered by one of these instead of Groq. They get
         the same chat messages, first name, grade and difficulty setting. Homework photos are never sent to them
         (profile pictures you upload are checked by Mistral — see "Profile picture" above).</li>
-      <li><strong>Cloudflare</strong> (the load balancer): when it decides which AI answers, it sees only numbers — how busy each AI is and how many
-        questions were asked recently — to decide which AI answers. Never names, messages or photos.</li>
+      <li><strong>The load balancer</strong> (a small Groq model): when it decides which AI answers, it sees only numbers — how busy each AI is and how many
+        questions were asked recently. Never names, messages or photos.</li>
       <li><strong>Exa</strong> (web search, used through Groq): for some questions
         that need up-to-date facts, the last few lines of the conversation are
         used to search the web. Your name, grade and account details are not

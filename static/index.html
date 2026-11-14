@@ -7,6 +7,12 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#2f6fed">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ThinkStep">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preload" href="/static/fonts/lexend-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts/lexend.css">
 <script>
@@ -407,6 +413,14 @@
     animation: msgIn .25s var(--ease);
   }
   .empty-state h2 { color: var(--primary-dark); margin-bottom: 6px; font-size: 24.5px; }
+  .holiday-note {
+    display: inline-block; background: var(--primary-light); color: var(--primary-dark);
+    border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px;
+    font-size: 14.5px; font-weight: 600; margin: 0 0 10px; max-width: 100%;
+    animation: holidayPop .5s var(--ease);
+  }
+  @keyframes holidayPop { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .holiday-note { animation: none; } }
   .starter-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
   .starter-chip {
     background: white; color: var(--primary-dark); border: 1px solid var(--border);
@@ -1158,6 +1172,12 @@
                  color: #92400e; border: 1px solid #fcd34d; box-shadow: none; white-space: nowrap; }
   #addEmailBtn.show { display: inline-flex; align-items: center; }
   #addEmailBtn:hover { background: #fde68a; }
+  #installBtn { display: none; font-size: 13.5px; padding: 6px 11px; border-radius: 999px; background: var(--primary-light);
+                color: var(--primary-dark); border: 1px solid var(--border); box-shadow: none; white-space: nowrap; }
+  #installBtn.show { display: inline-flex; align-items: center; }
+  #installBtn:hover { border-color: var(--primary); }
+  @media (max-width: 640px) { #installBtn .install-label { display: none; } #installBtn { padding: 6px 9px; } }
+  .install-steps { margin: 8px 0 4px; padding-left: 22px; font-size: 15px; line-height: 1.8; color: var(--text); text-align: left; }
   .unlock-list { margin: 8px 0 14px; padding-left: 20px; font-size: 14.5px; line-height: 1.7; color: var(--text); }
   .lock-note { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
   .feature-locked { opacity: .55; }
@@ -1305,6 +1325,7 @@
       </div>
     </div>
     <div class="model-picker">
+      <button type="button" id="installBtn" title="Put ThinkStep on your home screen like an app" aria-label="Get the ThinkStep app">📲<span class="install-label"> Get the app</span></button>
       <button type="button" id="addEmailBtn" title="Add your email to unlock every feature">📧 Add email</button>
       <button type="button" id="avatarBtn" class="avatar-btn" title="Your profile picture" aria-label="Your profile picture">😀</button>
       <button type="button" id="themeToggle" class="icon-btn" title="Night mode" aria-label="Night mode">🌙</button>
@@ -2783,6 +2804,46 @@ document.getElementById('uiCancel').addEventListener('click', () => uiDialogEl._
 uiDialogEl.addEventListener('click', (e) => { if (e.target === uiDialogEl && uiDialogEl._cancel) uiDialogEl._cancel(); });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && uiDialogEl.classList.contains('open') && uiDialogEl._cancel) uiDialogEl._cancel(); });
 
+/* ---------- Get the app (install to home screen) ----------
+   Free "app" without an app store: phones and computers can put ThinkStep
+   on the home screen, where it opens full-screen like a real app.
+   - Android / Chrome / Edge: the browser hands us an install prompt.
+   - iPhone / iPad: Apple has no prompt, so we show the 3 taps to do it.
+   The button hides itself once ThinkStep is already installed. */
+const installBtn = document.getElementById('installBtn');
+let installPrompt = null;
+const isInstalled = () =>
+  (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPads say they're Macs
+function updateInstallBtn() {
+  installBtn.classList.toggle('show', !isInstalled() && (!!installPrompt || isIOS()));
+}
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();          // we show our own button instead of the browser's mini-bar
+  installPrompt = e;
+  updateInstallBtn();
+});
+window.addEventListener('appinstalled', () => { installPrompt = null; updateInstallBtn(); });
+installBtn.addEventListener('click', async () => {
+  if (installPrompt) {
+    const p = installPrompt;
+    installPrompt = null;      // a prompt can only be used once
+    try { p.prompt(); await p.userChoice; } catch {}
+    updateInstallBtn();
+    return;
+  }
+  if (isIOS()) {
+    uiAlert('Put ThinkStep on your home screen',
+      'In Safari, tap the Share button (the square with an arrow ↑) at the bottom or top of the screen. ' +
+      'Scroll down and tap "Add to Home Screen", then tap "Add". ThinkStep will open like a real app!', '📲');
+  }
+});
+updateInstallBtn();
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+
 /* ---------- Delete account ---------- */
 async function deleteAccountFlow() {
   const name = currentUser ? currentUser.name : 'this';
@@ -2857,7 +2918,7 @@ async function refreshGuestStatus() {
     accountStatusEl.innerHTML = `
       You're using ThinkStep as a guest.<br>
       <strong>${g.remaining} of ${g.limit}</strong> free questions left.
-      <div class="guest-bar"><div class="guest-bar-fill ${g.remaining <= 5 ? 'low' : ''}" style="width:${pct}%"></div></div>
+      <div class="guest-bar"><div class="guest-bar-fill ${g.remaining <= 2 ? 'low' : ''}" style="width:${pct}%"></div></div>
     `;
   } catch {
     accountStatusEl.textContent = "You're using ThinkStep as a guest.";
@@ -3149,9 +3210,43 @@ const STARTERS = [
   "Why is the sky blue?",
   "Quiz me on multiplication",
 ];
+/* ---------- Holiday + school-day greetings ----------
+   Uses the kid's own date (their computer's clock), so it's right in every
+   time zone. Only widely shared, non-controversial days are listed: no
+   holidays unique to one religion and no politically argued ones. Christmas
+   is in because it's the one big shared winter holiday kids expect.
+   School dates are the usual US ones: first day = the day after Labor Day
+   (Labor Day = 1st Monday of September), last day = the 3rd Friday of June. */
+function nthWeekday(year, month, weekday, n) { // month 0-11, weekday 0=Sun
+  const d = new Date(year, month, 1);
+  const shift = (weekday - d.getDay() + 7) % 7;
+  return 1 + shift + (n - 1) * 7;
+}
+function holidayGreeting(now = new Date()) {
+  const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+  const is = (mm, dd) => m === mm && d === dd;
+  if (is(0, 1)) return '🎉 Happy New Year! A fresh start for learning.';
+  if (is(1, 14)) return "💝 Happy Valentine's Day!";
+  if (is(2, 14)) return '🥧 Happy Pi Day! 3.14159…';
+  if (is(3, 22)) return '🌍 Happy Earth Day!';
+  if (is(4, nthWeekday(y, 4, 0, 2))) return "💐 Happy Mother's Day!";
+  if (is(5, nthWeekday(y, 5, 0, 3))) return "👔 Happy Father's Day!";
+  if (is(5, nthWeekday(y, 5, 5, 3))) return '🎓 Happy last day of school! You made it. Have an awesome summer!';
+  if (is(6, 4)) return '🎆 Happy 4th of July!';
+  if (is(8, nthWeekday(y, 8, 1, 1) + 1)) return "🎒 Happy first day of school! Let's make it a great year.";
+  if (is(9, 31)) return '🎃 Happy Halloween!';
+  if (is(10, nthWeekday(y, 10, 4, 4))) return '🦃 Happy Thanksgiving!';
+  if (is(11, 24)) return '🎄 Merry Christmas Eve!';
+  if (is(11, 25)) return '🎄 Merry Christmas!';
+  if (is(11, 31)) return "🥳 Happy New Year's Eve!";
+  return '';
+}
+
 function renderEmptyState() {
   const first = currentUser && currentUser.name ? currentUser.name.trim().split(/\s+/)[0] : '';
+  const holiday = holidayGreeting();
   chat.innerHTML = `<div class="empty-state" id="empty">
+      ${holiday ? `<div class="holiday-note" role="status">${escapeHtml(holiday)}</div><br>` : ''}
       <button type="button" class="hero-avatar" id="heroAvatar" title="Your profile picture" aria-label="Your profile picture"></button>
       <div class="hero-level" id="heroLevel"></div>
       <h2>Hi${first ? ' ' + escapeHtml(first) : ''}! I'm ThinkStep 🧠</h2>

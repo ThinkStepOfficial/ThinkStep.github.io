@@ -1,0 +1,18 @@
+{
+  "id": "/app",
+  "name": "ThinkStep: Free AI Homework Tutor",
+  "short_name": "ThinkStep",
+  "description": "A free AI tutor that helps kids learn step by step, with hints instead of answers.",
+  "start_url": "/app?source=installed",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f8ff",
+  "theme_color": "#2f6fed",
+  "categories": ["education", "kids"],
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#2f6fed">
+<title>ThinkStep: you're offline</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #f4f8ff; color: #1b2740;
+         text-align: center; padding: 24px; box-sizing: border-box; }
+  @media (prefers-color-scheme: dark) { body { background: #111a2e; color: #e2e8f5; } p { color: #94a3c0 !important; } }
+  img { width: 72px; height: 72px; border-radius: 18px; }
+  h1 { font-size: 24px; margin: 16px 0 8px; }
+  p { color: #6b7c99; font-size: 16px; margin: 0 0 20px; line-height: 1.5; }
+  button { background: #2f6fed; color: #fff; border: 0; border-radius: 999px; padding: 12px 22px;
+           font-size: 16px; font-weight: 600; cursor: pointer; }
+</style>
+</head>
+<body>
+  <div>
+    <img src="/static/icon-192.png" alt="">
+    <h1>You're offline 📡</h1>
+    <p>ThinkStep needs the internet to think.<br>Check your Wi-Fi, then try again.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </div>
+</body>
+</html>
