@@ -14,7 +14,7 @@ return a friendly error instead of an AI response.
 It also has a small account system:
 - Accounts are just a name, grade (1-12), and password — no email needed.
 - Everyone uses the same tutor model (openai/gpt-oss-120b, the smartest).
-- Guests (no account) get 20 free questions total, then have to sign up.
+- Guests (no account) get 5 free questions total, then have to sign up.
 - Logged-in accounts have no question limit.
 - An optional "keep me signed in" checkbox makes the login persist for 30
   days; otherwise it's cleared when the browser closes.
@@ -1148,7 +1148,7 @@ def _online_snapshot():
 # an httponly cookie, not tied to any personal info) before
 # ThinkStep asks them to create a free account to keep going.
 # ============================================================
-GUEST_QUESTION_LIMIT = 20
+GUEST_QUESTION_LIMIT = 5
 GUEST_COOKIE_NAME = "thinkstep_guest_id"
 GUEST_USAGE_FILE = os.path.join(BASE_DIR, "guest_usage.json")
 _guest_lock = threading.Lock()
@@ -2631,6 +2631,19 @@ def ping():
     wake, and Google may give up on it. Deliberately touches nothing (no
     database, no AI), so it doesn't wake the database or use any quota."""
     return Response("ok", mimetype="text/plain")
+
+
+@app.route("/sw.js")
+def service_worker():
+    """Lets ThinkStep be installed like an app. It has to be served from the
+    top of the site (not /static/) so it can look after the /app page."""
+    return send_from_directory("static", "sw.js", mimetype="application/javascript")
+
+
+@app.route("/manifest.webmanifest")
+def web_manifest():
+    """The app's name, colors and icons for 'Add to Home Screen'."""
+    return send_from_directory("static", "manifest.webmanifest", mimetype="application/manifest+json")
 
 
 @app.route("/app")
