@@ -7,12 +7,6 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#2f6fed">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="ThinkStep">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preload" href="/static/fonts/lexend-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts/lexend.css">
 <script>
@@ -633,6 +627,25 @@
     gap: 6px;
   }
   .feedback-card { background: linear-gradient(160deg, var(--primary-light), var(--card)); }
+  /* Quick feedback ask that pops into the chat now and then */
+  .fb-ask { align-self: center; width: min(440px, 94%); margin: 6px auto 10px; background: var(--card);
+            border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-md);
+            padding: 14px 16px; text-align: center; position: relative; animation: msgIn .3s var(--ease); }
+  .fb-ask h4 { margin: 0 26px 8px; font-size: 16px; color: var(--primary-dark); }
+  .fb-ask .fb-x { position: absolute; top: 6px; right: 8px; background: none; border: 0; box-shadow: none;
+                  color: var(--muted); font-size: 16px; padding: 4px 8px; cursor: pointer; }
+  .fb-stars { display: flex; justify-content: center; gap: 4px; }
+  .fb-stars button { background: none; border: 0; box-shadow: none; font-size: 28px; padding: 2px 4px; cursor: pointer;
+                     filter: grayscale(1); opacity: .45; transition: transform .15s var(--ease), opacity .15s, filter .15s; }
+  .fb-stars button.on { filter: none; opacity: 1; }
+  .fb-stars button:hover { transform: scale(1.15); }
+  .fb-more { display: none; margin-top: 10px; }
+  .fb-ask.picked .fb-more { display: block; }
+  .fb-more textarea { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertical; border: 1px solid var(--border);
+                      border-radius: 12px; padding: 8px 10px; font: inherit; font-size: 15px; background: var(--bg); color: var(--text); }
+  .fb-row { display: flex; gap: 8px; justify-content: center; margin-top: 8px; }
+  .fb-row .fb-skip { background: none; color: var(--muted); border: 1px solid var(--border); box-shadow: none; }
+  .fb-msg { font-size: 13.5px; color: var(--muted); margin-top: 6px; min-height: 1em; }
   .feedback-card-text {
     font-size: 13.5px;
     color: var(--muted);
@@ -1172,12 +1185,6 @@
                  color: #92400e; border: 1px solid #fcd34d; box-shadow: none; white-space: nowrap; }
   #addEmailBtn.show { display: inline-flex; align-items: center; }
   #addEmailBtn:hover { background: #fde68a; }
-  #installBtn { display: none; font-size: 13.5px; padding: 6px 11px; border-radius: 999px; background: var(--primary-light);
-                color: var(--primary-dark); border: 1px solid var(--border); box-shadow: none; white-space: nowrap; }
-  #installBtn.show { display: inline-flex; align-items: center; }
-  #installBtn:hover { border-color: var(--primary); }
-  @media (max-width: 640px) { #installBtn .install-label { display: none; } #installBtn { padding: 6px 9px; } }
-  .install-steps { margin: 8px 0 4px; padding-left: 22px; font-size: 15px; line-height: 1.8; color: var(--text); text-align: left; }
   .unlock-list { margin: 8px 0 14px; padding-left: 20px; font-size: 14.5px; line-height: 1.7; color: var(--text); }
   .lock-note { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
   .feature-locked { opacity: .55; }
@@ -1325,7 +1332,6 @@
       </div>
     </div>
     <div class="model-picker">
-      <button type="button" id="installBtn" title="Put ThinkStep on your home screen like an app" aria-label="Get the ThinkStep app">📲<span class="install-label"> Get the app</span></button>
       <button type="button" id="addEmailBtn" title="Add your email to unlock every feature">📧 Add email</button>
       <button type="button" id="avatarBtn" class="avatar-btn" title="Your profile picture" aria-label="Your profile picture">😀</button>
       <button type="button" id="themeToggle" class="icon-btn" title="Night mode" aria-label="Night mode">🌙</button>
@@ -2166,6 +2172,80 @@ document.getElementById('emailLater').addEventListener('click', closeEmailModal)
 emailOverlay.addEventListener('click', (e) => { if (e.target === emailOverlay) closeEmailModal(); });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && emailOverlay.classList.contains('open')) closeEmailModal(); });
 // every 5 questions, an account without an email is reminded once
+/* ---------- Asking for feedback now and then ----------
+   After a few answered questions a small card pops into the chat asking how
+   ThinkStep is going (1–5 stars + an optional comment). It's sent to the
+   same place as the Feedback page. It never interrupts: it's skipped in talk
+   mode or when another box is open, it waits at least 3 days between asks,
+   and after someone sends feedback it leaves them alone for a month. */
+const FB_FIRST_AT = 4;          // first ask after the 4th answer (guests get 5)
+const FB_EVERY = 20;            // then about every 20 answers
+const FB_GAP_MS = 3 * 864e5;    // at least 3 days between asks
+const FB_AFTER_SENT_MS = 30 * 864e5;
+function maybeAskForFeedback() {
+  const n = parseInt(pGet('fbAnswers') || '0', 10) + 1;
+  pSet('fbAnswers', String(n));
+  const nextAt = parseInt(pGet('fbNextAt') || String(FB_FIRST_AT), 10);
+  if (n < nextAt || talkModeOn || document.querySelector('.fb-ask')) return;
+  if (document.querySelector('.open#emailOverlay, #uiDialog.open')) return; // another box is up
+  const now = Date.now();
+  if (now - parseInt(pGet('fbLastAsked') || '0', 10) < FB_GAP_MS) return;
+  if (now - parseInt(pGet('fbSentAt') || '0', 10) < FB_AFTER_SENT_MS) return;
+  pSet('fbLastAsked', String(now));
+  pSet('fbNextAt', String(n + FB_EVERY));
+  showFeedbackAsk();
+}
+function showFeedbackAsk() {
+  const card = document.createElement('div');
+  card.className = 'fb-ask';
+  card.setAttribute('role', 'group');
+  card.setAttribute('aria-label', 'Quick feedback');
+  card.innerHTML = `<button type="button" class="fb-x" title="Not now" aria-label="Not now">✕</button>
+    <h4>💬 How is ThinkStep helping you?</h4>
+    <div class="fb-stars">${[1, 2, 3, 4, 5].map(i =>
+      `<button type="button" data-stars="${i}" aria-label="${i} star${i > 1 ? 's' : ''}">⭐</button>`).join('')}</div>
+    <div class="fb-more">
+      <textarea maxlength="1000" placeholder="Anything we could make better? (optional)"></textarea>
+      <div class="fb-row"><button type="button" class="fb-send">Send</button>
+        <button type="button" class="fb-skip">Not now</button></div>
+    </div>
+    <div class="fb-msg" aria-live="polite"></div>`;
+  let stars = 0;
+  const msg = card.querySelector('.fb-msg');
+  card.querySelectorAll('.fb-stars button').forEach(b => b.addEventListener('click', () => {
+    stars = +b.dataset.stars;
+    card.querySelectorAll('.fb-stars button').forEach(x => x.classList.toggle('on', +x.dataset.stars <= stars));
+    card.classList.add('picked');
+    card.querySelector('textarea').focus();
+  }));
+  const close = () => card.remove();
+  card.querySelector('.fb-x').addEventListener('click', close);
+  card.querySelector('.fb-skip').addEventListener('click', close);
+  card.querySelector('.fb-send').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    if (!stars || btn.disabled) return;
+    btn.disabled = true;
+    msg.textContent = 'Sending…';
+    const first = currentUser && currentUser.name ? currentUser.name.trim().split(/\s+/)[0] : '';
+    const text = card.querySelector('textarea').value.trim();
+    try {
+      const res = await fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: (first || 'A ThinkStep student').slice(0, 100), stars,
+                               review: text || '(Quick rating from the chat — no comment)' }) });
+      const r = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(r.error || 'Something went wrong — try again later.');
+      pSet('fbSentAt', String(Date.now()));
+      card.innerHTML = '<h4 style="margin:4px 0;">Thank you! 💙</h4><div class="fb-msg">Your feedback helps make ThinkStep better.</div>';
+      setTimeout(() => card.remove(), 4000);
+    } catch (err) {
+      msg.textContent = err.message;
+      btn.disabled = false;
+    }
+  });
+  chat.appendChild(card);
+  scrollToBottom(true);
+}
+
 function maybeNudgeForEmail() {
   if (!currentUser || !currentUser.needsEmail) return;
   const n = parseInt(pGet('noEmailQuestions') || '0', 10) + 1;
@@ -2804,44 +2884,12 @@ document.getElementById('uiCancel').addEventListener('click', () => uiDialogEl._
 uiDialogEl.addEventListener('click', (e) => { if (e.target === uiDialogEl && uiDialogEl._cancel) uiDialogEl._cancel(); });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && uiDialogEl.classList.contains('open') && uiDialogEl._cancel) uiDialogEl._cancel(); });
 
-/* ---------- Get the app (install to home screen) ----------
-   Free "app" without an app store: phones and computers can put ThinkStep
-   on the home screen, where it opens full-screen like a real app.
-   - Android / Chrome / Edge: the browser hands us an install prompt.
-   - iPhone / iPad: Apple has no prompt, so we show the 3 taps to do it.
-   The button hides itself once ThinkStep is already installed. */
-const installBtn = document.getElementById('installBtn');
-let installPrompt = null;
-const isInstalled = () =>
-  (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
-const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) ||
-  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPads say they're Macs
-function updateInstallBtn() {
-  installBtn.classList.toggle('show', !isInstalled() && (!!installPrompt || isIOS()));
-}
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();          // we show our own button instead of the browser's mini-bar
-  installPrompt = e;
-  updateInstallBtn();
-});
-window.addEventListener('appinstalled', () => { installPrompt = null; updateInstallBtn(); });
-installBtn.addEventListener('click', async () => {
-  if (installPrompt) {
-    const p = installPrompt;
-    installPrompt = null;      // a prompt can only be used once
-    try { p.prompt(); await p.userChoice; } catch {}
-    updateInstallBtn();
-    return;
-  }
-  if (isIOS()) {
-    uiAlert('Put ThinkStep on your home screen',
-      'In Safari, tap the Share button (the square with an arrow ↑) at the bottom or top of the screen. ' +
-      'Scroll down and tap "Add to Home Screen", then tap "Add". ThinkStep will open like a real app!', '📲');
-  }
-});
-updateInstallBtn();
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+/* The "Get the app" feature was removed. Anyone who already had its helper
+   (service worker) gets it switched off here, so nothing is left behind. */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations()
+    .then((regs) => regs.forEach((r) => r.unregister()))
+    .catch(() => {});
 }
 
 /* ---------- Delete account ---------- */
@@ -4070,6 +4118,7 @@ async function sendMessage(text, opts = {}) {
       if (checkWork) earnBadge('checker');
       if (opts.simple) earnBadge('simple');
       maybeNudgeForEmail();
+      maybeAskForFeedback();
       if (!currentUser) refreshGuestStatus(); // keep the "X free questions left" count live
     } else {
       // Nothing was really answered: take the question back out of the saved
