@@ -2591,15 +2591,10 @@ def ping():
 
 @app.route("/sw.js")
 def service_worker():
-    """Lets ThinkStep be installed like an app. It has to be served from the
-    top of the site (not /static/) so it can look after the /app page."""
+    """The "Get the app" feature was removed. Browsers that installed its
+    helper still ask for this file now and then — what they get now just
+    switches the helper off and clears what it saved."""
     return send_from_directory("static", "sw.js", mimetype="application/javascript")
-
-
-@app.route("/manifest.webmanifest")
-def web_manifest():
-    """The app's name, colors and icons for 'Add to Home Screen'."""
-    return send_from_directory("static", "manifest.webmanifest", mimetype="application/manifest+json")
 
 
 @app.route("/app")
