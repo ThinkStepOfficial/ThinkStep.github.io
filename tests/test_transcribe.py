@@ -60,3 +60,25 @@ def test_page_uses_the_real_microphone_and_explains_blocked_mics(client):
     assert "getUserMedia" in html and "/api/transcribe" in html
     assert "Your microphone is blocked" in html
     assert "webkitSpeechRecognition" not in html
+
+
+def test_live_previews_use_their_own_allowance(app_module, client, monkeypatch):
+    monkeypatch.setattr(app_module, "_load_groq_api_key", lambda: "k")
+    monkeypatch.setattr(app_module.requests, "post", lambda *a, **k: _W("seven times"))
+    app_module._transcribe_limiter.limit = 1
+    res = client.post("/api/transcribe", data={"audio": (io.BytesIO(b"x" * 3000), "s.webm", "audio/webm"),
+                                               "partial": "1"}, content_type="multipart/form-data")
+    assert res.status_code == 200 and res.get_json()["text"] == "seven times"
+    assert _post(client).status_code == 200          # the real one still works
+    assert _post(client).status_code == 429
+
+
+def test_groq_busy_tells_the_page_to_pause_previews(app_module, client, monkeypatch):
+    monkeypatch.setattr(app_module, "_load_groq_api_key", lambda: "k")
+    monkeypatch.setattr(app_module.requests, "post", lambda *a, **k: _W(status=429))
+    assert _post(client).status_code == 429
+
+
+def test_page_types_while_you_talk(client):
+    html = client.get("/app").get_data(as_text=True)
+    assert "onPartial" in html and "fd.append('partial', '1')" in html
