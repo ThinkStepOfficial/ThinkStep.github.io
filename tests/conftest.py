@@ -132,6 +132,9 @@ def relax_spam_limits(module):
     # Guests only get 5 questions; most tests chat more than that.
     module._real_guest_question_limit = module.GUEST_QUESTION_LIMIT
     module.GUEST_QUESTION_LIMIT = 10_000
+    # The background Cloudflare chat review would make extra (fake) web calls
+    # in tests that set Cloudflare keys; tests about it call review_chat().
+    module.review_chat_later = lambda *a, **k: None
 
 
 def real_spam_limits(module):
