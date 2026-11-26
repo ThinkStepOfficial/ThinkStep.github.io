@@ -163,6 +163,7 @@
   #chatNotice a { color: inherit; font-weight: 700; }
   #chatNotice button { background: #6b4a12; color: #fff; border: 0; border-radius: 999px; padding: 4px 12px;
                        font-size: 13px; font-weight: 700; cursor: pointer; box-shadow: none; }
+  #chatNotice .cn-short { display: none; }
   :root[data-theme="dark"] #chatNotice { background: #2a2416; color: #ead9b0; border-color: #4d4122; }
   :root[data-theme="dark"] #chatNotice button { background: #ead9b0; color: #2a2416; }
   @keyframes slideDown {
@@ -1003,6 +1004,12 @@
     #toolsToggle { display: inline-flex; align-items: center; justify-content: center; }
   }
 
+  @media (max-width: 380px) {
+    #micBtn, #photoBtn, #talkBtn { min-width: 36px !important; width: 36px !important; font-size: 16px; }
+    #send { min-width: 46px !important; padding: 0 8px !important; }
+    .brand { font-size: 17px !important; }
+  }
+
   /* ===== MOBILE (<= 680px): both sidebars become drawers, stacked layout ===== */
   @media (max-width: 680px) {
     /* a simple top-to-bottom stack: header, chat (fills the rest), typing box at the bottom */
@@ -1060,7 +1067,19 @@
     input#prompt { font-size: 17px; padding: 12px 13px; min-height: 46px; min-width: 0; } /* 16px+ avoids iOS zoom */
     button { padding: 0 16px; min-height: 46px; }
     #send { min-width: 58px; padding: 0 12px; }
-    #micBtn, #photoBtn, #talkBtn { padding: 0; min-width: 42px; width: 42px; font-size: 18px; }
+    #micBtn, #photoBtn, #talkBtn { padding: 0; min-width: 40px; width: 40px; min-height: 44px; font-size: 17px; }
+
+    /* Phone fixes: compact notice, slimmer toolbar, more room to type */
+    #chatNotice { padding: 6px 10px; gap: 8px; flex-wrap: nowrap; font-size: 12.5px; text-align: left; line-height: 1.35; }
+    #chatNotice .cn-long { display: none; }
+    #chatNotice .cn-short { display: inline; }
+    #chatNotice button { padding: 4px 10px; font-size: 12px; min-height: 0; flex-shrink: 0; }
+    .chat-toolbar { padding: 4px 10px; }
+    #exportBtn, #feedbackLink { min-height: 30px; padding: 3px 10px; font-size: 12.5px; }
+    footer { padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); }
+    #form { gap: 5px; }
+    input#prompt { font-size: 16px; padding: 10px 11px; min-height: 44px; }
+    #send { min-width: 52px; min-height: 44px; padding: 0 10px; }
     .msg.user { margin-right: 34px; }
     .msg-avatar { right: -34px; width: 28px; height: 28px; font-size: 16px; }
 
@@ -1353,8 +1372,9 @@
   <div id="connBanner">⚠️ Can't reach ThinkStep's AI provider right now. Try reloading this page in a moment.</div>
 
   <div id="chatNotice" role="status">
-    <span>📢 <b>New:</b> chats are saved for 30 days, and the person who runs ThinkStep can read them to keep everyone safe.
+    <span class="cn-long">📢 <b>New:</b> chats are saved for 30 days, and the person who runs ThinkStep can read them to keep everyone safe.
       Don't share personal info like your address or phone number. <a href="/privacy" target="_blank" rel="noopener">Privacy</a></span>
+    <span class="cn-short">📢 Chats are saved 30 days and can be read to keep everyone safe. No personal info, please. <a href="/privacy" target="_blank" rel="noopener">More</a></span>
     <button type="button" id="chatNoticeOk">Got it</button>
   </div>
 
@@ -3541,6 +3561,7 @@ document.getElementById('exportBtn').addEventListener('click', () => {
 
 /* ---------- Voice input ---------- */
 const micBtn = document.getElementById('micBtn');
+if (window.matchMedia && matchMedia('(max-width: 680px)').matches) promptEl.placeholder = 'Ask a question…';
 const originalPlaceholder = promptEl.placeholder;
 const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -3663,7 +3684,7 @@ let pendingPhoto = null;
 
 function flashPlaceholder(msg) {
   promptEl.placeholder = msg;
-  setTimeout(() => { promptEl.placeholder = 'What are you working on?'; }, 3000);
+  setTimeout(() => { promptEl.placeholder = originalPlaceholder; }, 3000);
 }
 
 async function loadImageSource(file) {
