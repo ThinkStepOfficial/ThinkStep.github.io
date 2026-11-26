@@ -2508,7 +2508,10 @@ async function talkListen() {
   if (!talkModeOn) return;
   talkStatus('listening', "🗣 Talk mode: I'm listening… just say your question.");
   let res;
-  try { res = await VoiceRec.record({ maxMs: 30000, silenceMs: 1500, waitMs: 9000 }); }
+  try {
+    res = await VoiceRec.record({ maxMs: 30000, silenceMs: 1500, waitMs: 9000,
+      onPartial: (t) => { if (talkModeOn) talkStatus('listening', `🗣 "${t.slice(-90)}"`); } });
+  }
   catch (e) { stopTalkMode(); handleMicError(e); return; }
   if (!talkModeOn) return;
   if (!res.heard || res.blob.size < 1500) {
@@ -3606,7 +3609,7 @@ const VoiceRec = (() => {
   }
   // Records until you stop talking (or maxMs, or stop()). Resolves
   // { blob, heard } — heard is false if nobody said anything.
-  function record({ maxMs = 30000, silenceMs = 1500, waitMs = 8000 } = {}) {
+  function record({ maxMs = 30000, silenceMs = 1500, waitMs = 8000, onPartial = null } = {}) {
     return new Promise(async (resolve, reject) => {
       let s;
       try { s = await getMic(); } catch (e) { return reject(e); }
@@ -3617,6 +3620,20 @@ const VoiceRec = (() => {
       let heard = false, done = false, ctx = null, timer = null, metered = false;
       const t0 = Date.now();
       let lastLoud = t0, floor = 0.01, samples = 0;
+      // Live typing: every ~1.5 s while you talk, send what's been said so
+      // far and show it right away. Only one at a time; the final, full
+      // version replaces it when you stop talking.
+      let previewBusy = false, previewsOn = !!onPartial, lastPreview = t0;
+      const preview = () => {
+        if (!previewsOn || previewBusy || done || !heard || !chunks.length) return;
+        if (Date.now() - lastPreview < 1500) return;
+        previewBusy = true;
+        lastPreview = Date.now();
+        transcribe(new Blob(chunks, { type: (rec.mimeType || type || 'audio/webm').split(';')[0] }), true)
+          .then(t => { if (!done && t) onPartial(t); })
+          .catch(e => { if (e.status === 429) previewsOn = false; })
+          .finally(() => { previewBusy = false; });
+      };
       const finish = () => {
         if (done) return;
         done = true;
@@ -3652,18 +3669,20 @@ const VoiceRec = (() => {
           if (heard && now - lastLoud > silenceMs) finish();               // stopped talking
           if (!heard && now - t0 > waitMs) finish();                       // never started
           if (now - t0 > maxMs) finish();                                  // too long
+          preview();
         }, 100);
       } catch { try { ctx && ctx.close(); } catch {} ctx = null; metered = false; setTimeout(finish, Math.min(maxMs, 7000)); }   // no volume meter: record 7 seconds (tap 🎤 to finish sooner)
       rec.start(250);
     });
   }
-  async function transcribe(blob) {
+  async function transcribe(blob, partial = false) {
     const fd = new FormData();
     const ext = blob.type.includes('mp4') ? 'mp4' : blob.type.includes('ogg') ? 'ogg' : 'webm';
     fd.append('audio', blob, 'speech.' + ext);
+    if (partial) fd.append('partial', '1');
     const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(d.error || "I couldn't hear that — try again, or type it.");
+    if (!res.ok) throw Object.assign(new Error(d.error || "I couldn't hear that — try again, or type it."), { status: res.status });
     return (d.text || '').trim();
   }
   return { getMic, release, record, transcribe, permissionState, stop: () => stopNow && stopNow(), get busy() { return !!stopNow; } };
@@ -3721,18 +3740,20 @@ micBtn.addEventListener('click', async () => {
   if (!(await micReady())) return;
   micRecording = true;
   setMicState('listening');
+  const before = promptEl.value.trim();
+  const withBefore = (t) => before ? before + ' ' + t : t;
   try {
-    const { blob, heard } = await VoiceRec.record({ maxMs: 30000, silenceMs: 1800, waitMs: 8000 });
+    const { blob, heard } = await VoiceRec.record({ maxMs: 30000, silenceMs: 1800, waitMs: 8000,
+      onPartial: (t) => { if (micRecording) promptEl.value = withBefore(t); } });   // words appear as you talk
     micRecording = false;
     VoiceRec.release();
-    if (!heard || blob.size < 1500) { setMicState('error', "Didn't hear anything — try again a little louder."); return; }
+    if (!heard || blob.size < 1500) { promptEl.value = before; setMicState('error', "Didn't hear anything — try again a little louder."); return; }
     setMicState('working');
     micBtn.disabled = true;
     const text = await VoiceRec.transcribe(blob);
     setMicState('idle');
-    if (!text) { setMicState('error', "Didn't catch that — try again."); return; }
-    const base = promptEl.value.trim();
-    promptEl.value = base ? base + ' ' + text : text;
+    if (!text) { promptEl.value = before; setMicState('error', "Didn't catch that — try again."); return; }
+    promptEl.value = withBefore(text);                     // the full, final version
     promptEl.focus();
   } catch (e) {
     micRecording = false;
