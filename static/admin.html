@@ -309,6 +309,11 @@
     </div>
 
     <div class="list-card" style="margin-top:16px;">
+      <h2>🛡️ Cloudflare chat review <span id="reviewNote" style="font-weight:400;color:var(--muted);font-size:12.5px;"></span></h2>
+      <div id="reviewList"><div class="empty-note">Loading…</div></div>
+    </div>
+
+    <div class="list-card" style="margin-top:16px;">
       <h2>Recent safety flags</h2>
       <div id="safetyFlagsList"><div class="empty-note">Loading…</div></div>
     </div>
@@ -620,6 +625,23 @@ async function fetchErrors() {
           <div style="margin-top:2px;font-size:12.5px;color:var(--muted);">Recently: ${recent}</div>
         </div>`;
       }).join('');
+      const rv = data.chatReview;
+      const rvEl = document.getElementById('reviewList');
+      if (rv && rvEl) {
+        document.getElementById('reviewNote').textContent = !rv.ready
+          ? '(⚪ needs the Cloudflare keys on Render)'
+          : `(${rv.resting ? '🟠 resting' : '🟢 on'} · ${rv.model} · ${rv.checks} chats checked since restart)`;
+        const label = { off_topic: '📵 Off-topic', inappropriate: '⚠️ Inappropriate', unsafe: '🚨 Unsafe' };
+        rvEl.innerHTML = rv.recent.length ? rv.recent.slice(0, 30).map(f => `
+          <div class="flag-row">
+            <span class="flag-who">${escapeHtml(f.who || 'Someone')}</span>
+            <span class="error-kind">${escapeHtml(label[f.kind] || f.kind)}</span>
+            <span class="flag-time">${escapeHtml(new Date(f.time).toLocaleString())}</span>
+            ${f.reason ? `<div class="error-detail">Cloudflare: “${escapeHtml(f.reason)}”</div>` : ''}
+            <div class="flag-msg">${escapeHtml(f.q)}</div>
+          </div>`).join('')
+          : '<div class="empty-note">Nothing flagged — all chats look fine. 🎉</div>';
+      }
       const bal = data.balancer;
       if (bal) {
         const main = !bal.ready ? '⚪ no Groq key (least busy AI is used)'
