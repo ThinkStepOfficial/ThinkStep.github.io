@@ -101,6 +101,12 @@ class FileStore:
             json.dump(data, f, indent=2)
         os.replace(tmp, path)
 
+    def delete(self, name):
+        try:
+            os.remove(self._path(name))
+        except FileNotFoundError:
+            pass
+
     def write_if_absent(self, name, data):
         existing = self.read(name)
         if existing is not None:
@@ -195,6 +201,9 @@ class PostgresStore:
                SET data = EXCLUDED.data, updated_at = now()""",
             (name, self._Jsonb(data)),
         ))
+
+    def delete(self, name):
+        self._run(lambda c: c.execute("DELETE FROM thinkstep_store WHERE name = %s", (name,)))
 
     def write_if_absent(self, name, data):
         """Saves data only if nothing is stored under this name yet, and
@@ -1517,6 +1526,78 @@ def _log_safety_flag(who, message_text):
         STORE.write("safety_flags.json", flags)
 
 
+# ============================================================
+# Chat log — the admin can read every chat (kids and parents are told:
+# see the privacy page and the in-app notice). Each question + answer is
+# saved on the server for CHAT_LOG_DAYS days, then deleted for good.
+# One document per day ("chatlog-YYYY-MM-DD.json") keeps each save small.
+# Photos are never saved — only a note that one was sent. Deleting an
+# account deletes that account's saved chats too.
+# ============================================================
+CHAT_LOG_DAYS = 30
+CHAT_LOG_MAX_PER_DAY = 5000          # safety cap so one day can't grow forever
+_chat_log_lock = threading.Lock()
+
+
+def _chat_day_name(day):
+    return f"chatlog-{day}.json"
+
+
+def _chat_log_days():
+    days = STORE.read("chatlog_days.json", []) or []
+    return [d for d in days if isinstance(d, str)]
+
+
+def log_chat(person, who, grade, question, answer, photo=False, blocked=False):
+    """Saves one question + answer for the admin's chat viewer."""
+    if not person:
+        return
+    try:
+        now = datetime.now(timezone.utc)
+        day = now.date().isoformat()
+        entry = {"person": person, "who": who, "grade": grade or "",
+                 "q": (question or "")[:4000], "a": (answer or "")[:8000],
+                 "photo": bool(photo), "blocked": bool(blocked), "time": now.isoformat()}
+        with _chat_log_lock:
+            name = _chat_day_name(day)
+            rows = STORE.read(name, []) or []
+            if len(rows) >= CHAT_LOG_MAX_PER_DAY:
+                return
+            rows.append(entry)
+            STORE.write(name, rows)
+            days = _chat_log_days()
+            if day not in days:
+                days.append(day)
+                cutoff = (now.date() - timedelta(days=CHAT_LOG_DAYS - 1)).isoformat()
+                for old in [d for d in days if d < cutoff]:
+                    STORE.delete(_chat_day_name(old))
+                days = sorted(d for d in days if d >= cutoff)
+                STORE.write("chatlog_days.json", days)
+    except Exception as e:  # saving the log must never break the chat
+        print(f"[ThinkStep] Couldn't save chat log: {type(e).__name__}")
+
+
+def _chat_log_rows():
+    """Every saved row from the last CHAT_LOG_DAYS days, oldest first."""
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=CHAT_LOG_DAYS - 1)).isoformat()
+    rows = []
+    for day in sorted(_chat_log_days()):
+        if day >= cutoff:
+            rows.extend(r for r in (STORE.read(_chat_day_name(day), []) or []) if isinstance(r, dict))
+    return rows
+
+
+def forget_chat_log(person):
+    """Deletes every saved chat for one person (used when an account is deleted)."""
+    with _chat_log_lock:
+        for day in _chat_log_days():
+            name = _chat_day_name(day)
+            rows = STORE.read(name, []) or []
+            kept = [r for r in rows if r.get("person") != person]
+            if len(kept) != len(rows):
+                STORE.write(name, kept)
+
+
 def check_safety_flag(who, message_text):
     """Scans a student's message for concerning language. If matched,
     logs it and emails the operator. Never blocks or delays the chat
@@ -2739,6 +2820,30 @@ def admin_accounts():
     return jsonify({"accounts": accounts, "total": len(accounts)})
 
 
+@app.route("/api/admin/chats")
+def admin_chats():
+    """Everyone's chats from the last CHAT_LOG_DAYS days. Without ?person=
+    it lists the people (newest first); with it, that person's messages."""
+    if not require_admin():
+        return jsonify({"error": "Not authorized."}), 401
+    rows = _chat_log_rows()
+    person = (request.args.get("person") or "").strip()
+    if person:
+        mine = [r for r in rows if r.get("person") == person]
+        return jsonify({"person": person, "messages": mine[-500:]})
+    people = {}
+    for r in rows:
+        p = people.setdefault(r.get("person"), {"person": r.get("person"), "who": r.get("who"),
+                                               "grade": r.get("grade", ""), "count": 0,
+                                               "guest": str(r.get("person", "")).startswith("guest:")})
+        p["count"] += 1
+        p["last"] = r.get("time")
+        p["lastQ"] = (r.get("q") or "")[:120]
+        p["who"] = r.get("who") or p["who"]
+    out = sorted(people.values(), key=lambda p: p.get("last") or "", reverse=True)
+    return jsonify({"people": out[:300], "days": CHAT_LOG_DAYS})
+
+
 @app.route("/api/admin/safety-flags")
 def admin_safety_flags():
     if not require_admin():
@@ -3358,6 +3463,7 @@ def delete_account():
     users.pop(key, None)
     _save_users(users)
     forget_activity(key)
+    forget_chat_log(f"acct:{key}")
     session.pop("user_key", None)
     _clear_login_failures(key)
     print(f"[ThinkStep] Account deleted (self-service): {name}")
@@ -4332,6 +4438,9 @@ def chat():
     last_user_msg = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
     who_label = name if name else f"guest {guest_id}" if guest_id else "guest"
     safety_flagged = check_safety_flag(who_label, last_user_msg)
+    # For the admin's chat viewer: who this is (accounts by name, guests by ID).
+    chat_person = (f"acct:{account_key}" if user else f"guest:{guest_id}" if guest_id else None)
+    chat_who = name or (user.get("name") if user else "") or (f"Guest {guest_id[:6]}" if guest_id else "Guest")
     difficulty = _s(profile, "difficulty").strip()
     print(f"[ThinkStep] Student profile on this request — name: {name or '(none)'}, grade: {grade or '(none)'}, difficulty: {difficulty or 'just right'}")
 
@@ -4429,6 +4538,7 @@ def chat():
                                   "content": payload["messages"][0]["content"] + GATE_UNCHECKED_NOTE}
     if gate["blocked"]:
         print(f"[ThinkStep] OFF-TASK blocked — {who_label}: {last_user_msg[:120]!r}")
+        log_chat(chat_person, chat_who, grade, last_user_msg, OFF_TASK_REPLY, blocked=True)
 
         def generate_off_task():
             yield NOTICE + OFF_TASK_REPLY
@@ -4512,7 +4622,7 @@ def chat():
                         + "\n=== END WEB NOTES ===\n",
                     }
             used_web_notes = bool(use_web and notes)
-            answer_parts = []  # what the student actually sees, to check at the end
+            answer_parts = result["answer_parts"] = []  # what the student sees (checked at the end, and saved to the chat log)
             # Every TUTOR_ATTEMPTS step on the chosen model, in order. The
             # rate-limit fallback model is only added if Groq says "busy".
             ladder = [(model, extra) for extra in TUTOR_ATTEMPTS]
@@ -4661,6 +4771,9 @@ def chat():
             yield item
 
         succeeded = result["succeeded"]
+        if succeeded:
+            log_chat(chat_person, chat_who, grade, last_user_msg,
+                     "".join(result.get("answer_parts") or []), photo=bool(photo))
 
         # Only count a guest's free question if it genuinely got a response —
         # a timeout, connection error, or crash shouldn't cost them anything.
