@@ -502,8 +502,9 @@ only send a student to a lower-ranked AI when the better ones are clearly
 busier, so the load stays reasonably even without giving up quality. If two
 AIs are about as busy, pick the better one. Students who ask a lot can go to
 a lower-ranked AI first so the best one stays free for everyone else.
-Mistral also checks students' profile pictures; that work is already included
-in its "answering_now" count, so treat it as real load.
+Mistral also checks students' profile pictures, and Cloudflare also reviews
+every finished chat for off-topic or inappropriate messages. That extra work is
+already included in their "answering_now" counts, so treat it as real load.
 Only pick an AI from the list.
 Reply with JSON only: {"send_to": "<AI name>", "reason": "a few words"}"""
 _balance = {"asks": {}, "log": [], "checks": 0, "rest_until": 0.0}
@@ -1596,6 +1597,121 @@ def forget_chat_log(person):
             kept = [r for r in rows if r.get("person") != person]
             if len(kept) != len(rows):
                 STORE.write(name, kept)
+
+
+# ---- Cloudflare chat review ----
+# After each saved chat, a small Cloudflare model reads the question and
+# answer and says if anything was off-topic, mean, inappropriate or unsafe.
+# Anything it flags shows up in the admin panel ("Cloudflare chat review").
+# It runs in the background, so it never slows a kid down. While it works it
+# counts as Cloudflare being busy, so the balancer sees that load too.
+# Off-topic questions the gate already blocked are flagged without asking.
+CHAT_REVIEW_MODEL = "@cf/openai/gpt-oss-20b"
+CHAT_REVIEW_KEEP = 300
+CHAT_REVIEW_PROMPT = """You review chats from a homework tutor app for kids (grades 1-12).
+You get the student's message and the tutor's reply. Decide if anything needs
+an adult to look at it:
+- "off_topic": clearly not school or learning (games, gossip, chatting about random stuff, trying to get the tutor to do non-school things)
+- "inappropriate": rude, mean, bullying, swearing, sexual, violent or otherwise not OK for kids — from the student OR the tutor
+- "unsafe": someone might be in danger, being hurt, or wants to hurt themselves or others; or sharing personal info like an address or phone number
+- "ok": normal schoolwork or curious learning questions (most chats are ok)
+Be fair: curious science, history or health questions are ok. Only flag real problems.
+Reply with JSON only: {"verdict": "ok|off_topic|inappropriate|unsafe", "reason": "a few words"}"""
+_review_lock = threading.Lock()
+_review_state = {"checks": 0, "flags": 0, "rest_until": 0.0}
+
+
+def _review_model():
+    return (os.environ.get("CLOUDFLARE_REVIEW_MODEL") or "").strip() or CHAT_REVIEW_MODEL
+
+
+def chat_review_ready():
+    return bool((os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+                and (os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip())
+
+
+def _load_content_flags():
+    data = STORE.read("content_flags.json", []) or []
+    return data if isinstance(data, list) else []
+
+
+def _save_content_flag(person, who, question, verdict, reason, answer=""):
+    with _review_lock:
+        flags = _load_content_flags()
+        flags.append({"person": person, "who": who, "kind": verdict, "reason": (reason or "")[:120],
+                      "q": (question or "")[:500], "a": (answer or "")[:500],
+                      "time": datetime.now(timezone.utc).isoformat()})
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=CHAT_LOG_DAYS)).isoformat()
+        flags = [f for f in flags if str(f.get("time", "")) >= cutoff]  # same 30 days as chats
+        STORE.write("content_flags.json", flags[-CHAT_REVIEW_KEEP:])
+        _review_state["flags"] += 1
+
+
+def _parse_review(text):
+    m = re.search(r'"?verdict"?\s*[:=]\s*"(ok|off_topic|inappropriate|unsafe)"', text or "", re.I)
+    if not m:
+        return None, ""
+    r = re.search(r'"?reason"?\s*[:=]\s*"([^"]{0,120})', text)
+    return m.group(1).lower(), (r.group(1) if r else "")
+
+
+def review_chat(person, who, question, answer):
+    """Asks Cloudflare whether this chat needs an adult to look at it.
+    Returns the verdict ("ok", "off_topic", ...) or None if it couldn't check."""
+    if not chat_review_ready() or _review_state["rest_until"] > time.time():
+        return None
+    acct = os.environ["CLOUDFLARE_ACCOUNT_ID"].strip()
+    url = f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/v1/chat/completions"
+    ticket = _provider_start("Cloudflare", "chat review")
+    try:
+        r = requests.post(url, headers={"Authorization": f"Bearer {os.environ['CLOUDFLARE_API_TOKEN'].strip()}"}, json={
+            "model": _review_model(),
+            "messages": [{"role": "system", "content": CHAT_REVIEW_PROMPT},
+                         {"role": "user", "content": json.dumps(
+                             {"student": (question or "")[:2000], "tutor": (answer or "")[:2000]})}],
+            "max_tokens": 300, "temperature": 0,
+        }, timeout=(5, 30))
+        if r.status_code != 200:
+            print(f"[ThinkStep] Chat review: Cloudflare said {r.status_code} — pausing reviews for a bit.")
+            _review_state["rest_until"] = time.time() + 300
+            return None
+        data = r.json()
+        msg = ((data.get("choices") or [{}])[0].get("message") or {}) if isinstance(data, dict) else {}
+        verdict, reason = _parse_review(str(msg.get("content") or ""))
+        if verdict is None:
+            return None
+        with _review_lock:
+            _review_state["checks"] += 1
+        if verdict != "ok":
+            _save_content_flag(person, who, question, verdict, reason, answer)
+        return verdict
+    except Exception as e:
+        print(f"[ThinkStep] Chat review: Cloudflare error ({type(e).__name__}).")
+        _review_state["rest_until"] = time.time() + 120
+        return None
+    finally:
+        _provider_end("Cloudflare", ticket)
+
+
+def forget_content_flags(person):
+    with _review_lock:
+        flags = _load_content_flags()
+        kept = [f for f in flags if f.get("person") != person]
+        if len(kept) != len(flags):
+            STORE.write("content_flags.json", kept)
+
+
+def review_chat_later(person, who, question, answer):
+    """Runs review_chat in the background so the kid never waits for it."""
+    if chat_review_ready():
+        threading.Thread(target=review_chat, args=(person, who, question, answer), daemon=True).start()
+
+
+def chat_review_status():
+    return {"ready": chat_review_ready(), "model": _review_model(),
+            "resting": _review_state["rest_until"] > time.time(),
+            "checks": _review_state["checks"], "flags": _review_state["flags"],
+            "recent": list(reversed(_load_content_flags()))[:50]}
 
 
 def check_safety_flag(who, message_text):
@@ -2881,7 +2997,8 @@ def admin_errors():
     return jsonify({"errors": list(reversed(entries))[:100],
                     "lastHour": hour, "last24h": day,
                     "providers": backup_status(),
-                    "balancer": balancer_status()})
+                    "balancer": balancer_status(),
+                    "chatReview": chat_review_status()})
 
 
 # Errors the page saw that never reached the server (internet dropped,
@@ -3464,6 +3581,7 @@ def delete_account():
     _save_users(users)
     forget_activity(key)
     forget_chat_log(f"acct:{key}")
+    forget_content_flags(f"acct:{key}")
     session.pop("user_key", None)
     _clear_login_failures(key)
     print(f"[ThinkStep] Account deleted (self-service): {name}")
@@ -4539,6 +4657,7 @@ def chat():
     if gate["blocked"]:
         print(f"[ThinkStep] OFF-TASK blocked — {who_label}: {last_user_msg[:120]!r}")
         log_chat(chat_person, chat_who, grade, last_user_msg, OFF_TASK_REPLY, blocked=True)
+        _save_content_flag(chat_person, chat_who, last_user_msg, "off_topic", "blocked by the topic check")
 
         def generate_off_task():
             yield NOTICE + OFF_TASK_REPLY
@@ -4772,8 +4891,9 @@ def chat():
 
         succeeded = result["succeeded"]
         if succeeded:
-            log_chat(chat_person, chat_who, grade, last_user_msg,
-                     "".join(result.get("answer_parts") or []), photo=bool(photo))
+            answer_text = "".join(result.get("answer_parts") or [])
+            log_chat(chat_person, chat_who, grade, last_user_msg, answer_text, photo=bool(photo))
+            review_chat_later(chat_person, chat_who, last_user_msg, answer_text)
 
         # Only count a guest's free question if it genuinely got a response —
         # a timeout, connection error, or crash shouldn't cost them anything.
