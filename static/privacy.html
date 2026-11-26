@@ -257,9 +257,9 @@
         (profile pictures you upload are checked by Mistral — see "Profile picture" above).</li>
       <li><strong>The load balancer</strong> (a small Groq model): when it decides which AI answers, it sees only numbers — how busy each AI is and how many
         questions were asked recently. Never names, messages or photos.</li>
-      <li><strong>Exa</strong> (web search, used through Groq): for some questions
+      <li><strong>Exa</strong> (web search, used through Groq), and <strong>Wikipedia</strong> as a backup: for some questions
         that need up-to-date facts, the last few lines of the conversation are
-        used to search the web. Your name, grade and account details are not
+        used to search the web (Wikipedia only gets a few search words from the question). Your name, grade and account details are not
         included.</li>
       <li><strong>Render</strong> (website hosting) and <strong>Neon</strong>
         (database): run the website and store account information, feedback,
