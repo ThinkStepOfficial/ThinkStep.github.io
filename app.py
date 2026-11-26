@@ -4359,6 +4359,63 @@ def check_avatar():
     return jsonify({"ok": ok, "reason": reason or ("Looks great!" if ok else "That picture can't be used.")})
 
 
+# ============================================================
+# Voice typing — the 🎤 button and talk mode record a few seconds of audio
+# in the browser and send it here; Groq's Whisper turns it into text. This
+# works in every browser (the old built-in speech feature only worked in
+# Chrome and Edge, and often heard nothing). The audio is never saved.
+# ============================================================
+GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+TRANSCRIBE_MODEL = "whisper-large-v3-turbo"
+TRANSCRIBE_MAX_BYTES = 3 * 1024 * 1024           # about a minute of compressed audio
+TRANSCRIBE_PER_HOUR = 120
+_transcribe_limiter = SlidingWindowLimiter(TRANSCRIBE_PER_HOUR, 3600)
+_AUDIO_TYPES = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "mp4", "audio/mpeg": "mp3",
+                "audio/wav": "wav", "audio/x-wav": "wav", "audio/aac": "m4a", "video/webm": "webm",
+                "video/mp4": "mp4"}
+# Whisper sometimes "hears" these in silence — treat them as nothing said.
+_WHISPER_GHOSTS = {"", "you", "thank you.", "thank you", "thanks for watching!", "thanks for watching.",
+                   "bye.", "bye", ".", "uh", "um"}
+
+
+@app.route("/api/transcribe", methods=["POST"])
+def transcribe():
+    user = get_current_user()
+    if not user and session.get("guest_age") != "ok":
+        return jsonify({"error": "Please answer the quick age question first."}), 403
+    f = request.files.get("audio")
+    if f is None:
+        return jsonify({"error": "No audio was sent."}), 400
+    kind = (f.mimetype or "").split(";")[0].strip().lower()
+    ext = _AUDIO_TYPES.get(kind)
+    if not ext:
+        return jsonify({"error": "That audio type isn't supported."}), 400
+    audio = f.read(TRANSCRIBE_MAX_BYTES + 1)
+    if not audio or len(audio) > TRANSCRIBE_MAX_BYTES:
+        return jsonify({"error": "That recording is too long — try a shorter question."}), 400
+    if _transcribe_limiter.hit(visitor_id()):
+        return jsonify({"error": "Lots of talking! Take a short break, or type your question."}), 429
+    key = _load_groq_api_key()
+    if not key:
+        return jsonify({"error": "Voice typing isn't set up yet."}), 503
+    try:
+        r = requests.post(GROQ_TRANSCRIBE_URL, headers={"Authorization": f"Bearer {key}"},
+                          files={"file": (f"speech.{ext}", audio, kind)},
+                          data={"model": os.environ.get("TRANSCRIBE_MODEL", "").strip() or TRANSCRIBE_MODEL,
+                                "response_format": "json", "temperature": "0"},
+                          timeout=(5, 30))
+        if r.status_code != 200:
+            print(f"[ThinkStep] Voice typing: Groq said {r.status_code}.")
+            return jsonify({"error": "I couldn't hear that right now — try again, or type it."}), 502
+        text = " ".join(str((r.json() or {}).get("text") or "").split())
+    except Exception as e:
+        print(f"[ThinkStep] Voice typing error ({type(e).__name__}).")
+        return jsonify({"error": "I couldn't hear that right now — try again, or type it."}), 502
+    if text.lower() in _WHISPER_GHOSTS:
+        text = ""
+    return jsonify({"text": text[:2000]})
+
+
 @app.route("/api/speak", methods=["POST"])
 def speak():
     user = get_current_user()
