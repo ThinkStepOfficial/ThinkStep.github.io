@@ -640,6 +640,7 @@
   }
   .feedback-card { background: linear-gradient(160deg, var(--primary-light), var(--card)); }
   /* Quick feedback ask that pops into the chat now and then */
+  #uiText { white-space: pre-line; text-align: left; }
   .fb-ask { align-self: center; width: min(440px, 94%); margin: 6px auto 10px; background: var(--card);
             border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-md);
             padding: 14px 16px; text-align: center; position: relative; animation: msgIn .3s var(--ease); }
@@ -2488,7 +2489,7 @@ fontSelect.addEventListener('change', () => {
 const talkBtn = document.getElementById('talkBtn');
 const talkBanner = document.getElementById('talkBanner');
 const talkText = document.getElementById('talkText');
-let talkModeOn = false, talkRec = null, talkMisses = 0;
+let talkModeOn = false, talkMisses = 0;
 function talkStatus(kind, text) {
   talkBanner.classList.toggle('show', talkModeOn);
   talkBanner.classList.toggle('thinking', kind === 'thinking');
@@ -2498,14 +2499,33 @@ function talkStatus(kind, text) {
 function stopTalkMode(msg) {
   talkModeOn = false;
   talkBtn.classList.remove('on');
-  try { talkRec && talkRec.abort(); } catch {}
+  try { VoiceRec.stop(); } catch {}
+  try { VoiceRec.release(); } catch {}
   talkBanner.classList.remove('show');
   if (msg) showToast(msg);
 }
-function talkListen() {
+async function talkListen() {
   if (!talkModeOn) return;
   talkStatus('listening', "🗣 Talk mode: I'm listening… just say your question.");
-  try { talkRec.start(); } catch {}
+  let res;
+  try { res = await VoiceRec.record({ maxMs: 30000, silenceMs: 1500, waitMs: 9000 }); }
+  catch (e) { stopTalkMode(); handleMicError(e); return; }
+  if (!talkModeOn) return;
+  if (!res.heard || res.blob.size < 1500) {
+    if (++talkMisses >= 3) return stopTalkMode("Talk mode stopped — I didn't hear anything.");
+    return talkListen();
+  }
+  talkStatus('thinking', '✍️ Writing down what you said…');
+  let text = '';
+  try { text = await VoiceRec.transcribe(res.blob); }
+  catch (e) { showToast(e.message); }
+  if (!talkModeOn) return;
+  if (!text) {
+    if (++talkMisses >= 3) return stopTalkMode("Talk mode stopped — I couldn't make out what you said.");
+    return talkListen();
+  }
+  talkMisses = 0;
+  talkHeard(text);
 }
 async function talkHeard(text) {
   if (!talkModeOn || !text.trim()) return talkListen();
@@ -2517,32 +2537,9 @@ async function talkHeard(text) {
   try { if (lastSpeech) await lastSpeech; } catch {}
   setTimeout(talkListen, 350);
 }
-function startTalkMode() {
-  if (!SpeechRecognitionAPI || !isSecureContext) {
-    showToast('Talk mode needs Chrome or Edge on a computer, or Chrome on Android.');
-    return;
-  }
+async function startTalkMode() {
   if (!currentUser && guestAgeStatus !== 'ok') { openAgeModal(); return; }
-  if (!talkRec) {
-    talkRec = new SpeechRecognitionAPI();
-    talkRec.lang = 'en-US';
-    talkRec.continuous = false;
-    talkRec.interimResults = false;
-    talkRec.addEventListener('result', (e) => {
-      talkMisses = 0;
-      const said = Array.from(e.results).map(r => r[0].transcript).join(' ');
-      talkHeard(said);
-    });
-    talkRec.addEventListener('error', (e) => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') stopTalkMode('Allow the microphone for this site to use talk mode.');
-      else if (e.error === 'no-speech') { if (++talkMisses >= 3) stopTalkMode("Talk mode stopped — I didn't hear anything."); }
-    });
-    talkRec.addEventListener('end', () => {
-      // nothing heard this round (no result) → listen again, unless busy answering
-      if (talkModeOn && !busy && talkBanner.classList.contains('show') &&
-          !talkBanner.classList.contains('thinking') && !talkBanner.classList.contains('speaking')) setTimeout(talkListen, 300);
-    });
-  }
+  if (!(await micReady())) return;            // asks the browser for the mic, or explains how to unblock it
   talkModeOn = true;
   talkMisses = 0;
   talkBtn.classList.add('on');
@@ -3562,96 +3559,191 @@ document.getElementById('exportBtn').addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
-/* ---------- Voice input ---------- */
+/* ---------- Voice input ----------
+   The 🎤 button and talk mode record a few seconds with the microphone and
+   send it to ThinkStep, where Groq's Whisper writes down what was said. This
+   works in every browser (the old built-in speech feature only worked in
+   Chrome/Edge and often heard nothing). Recording stops by itself when you
+   stop talking. Asking for the mic shows the browser's own "Allow
+   microphone?" box; if the mic is blocked, a ThinkStep box explains how to
+   turn it back on. */
 const micBtn = document.getElementById('micBtn');
 if (window.matchMedia && matchMedia('(max-width: 680px)').matches) promptEl.placeholder = 'Ask a question…';
 const originalPlaceholder = promptEl.placeholder;
-const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-// The browser only allows microphone access on a "secure context": pages
-// served over https://, OR pages opened as http://localhost. If you're on
-// your phone/tablet using your PC's IP address (like http://192.168.x.x:5000)
-// that counts as insecure, and the browser will silently refuse — so we
-// detect that case and explain it instead of leaving a dead button.
 const isSecureContext = window.isSecureContext ||
-  location.hostname === 'localhost' ||
-  location.hostname === '127.0.0.1';
+  location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+const canRecord = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
 
-function setMicState(state, message) {
-  // state: 'idle' | 'listening' | 'error'
-  micBtn.classList.toggle('recording', state === 'listening');
-  if (state === 'listening') {
-    promptEl.placeholder = '🎤 Listening… speak now';
-  } else if (state === 'error') {
-    promptEl.placeholder = message || 'Voice input had a problem — try again';
-    setTimeout(() => { promptEl.placeholder = originalPlaceholder; }, 2500);
+const VoiceRec = (() => {
+  let stream = null, stopNow = null;
+  function micError(e) {
+    const n = e && e.name;
+    const code = (n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError') ? 'blocked'
+      : (n === 'NotFoundError' || n === 'OverconstrainedError' || n === 'DevicesNotFoundError') ? 'nomic'
+      : (n === 'NotReadableError' || n === 'TrackStartError' || n === 'AbortError') ? 'busy' : 'other';
+    return Object.assign(new Error(code), { code });
+  }
+  async function permissionState() {
+    try { return (await navigator.permissions.query({ name: 'microphone' })).state; } catch { return 'unknown'; }
+  }
+  async function getMic() {
+    if (!canRecord || !isSecureContext) throw Object.assign(new Error('unsupported'), { code: 'unsupported' });
+    if (stream && stream.getAudioTracks().some(t => t.readyState === 'live')) return stream;
+    try {
+      // This is what makes the browser show its "Allow microphone?" pop-up.
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      return stream;
+    } catch (e) { throw micError(e); }
+  }
+  function release() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  }
+  function pickType() {
+    for (const t of ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/ogg']) {
+      try { if (MediaRecorder.isTypeSupported(t)) return t; } catch {}
+    }
+    return '';
+  }
+  // Records until you stop talking (or maxMs, or stop()). Resolves
+  // { blob, heard } — heard is false if nobody said anything.
+  function record({ maxMs = 30000, silenceMs = 1500, waitMs = 8000 } = {}) {
+    return new Promise(async (resolve, reject) => {
+      let s;
+      try { s = await getMic(); } catch (e) { return reject(e); }
+      const type = pickType();
+      let rec;
+      try { rec = new MediaRecorder(s, type ? { mimeType: type } : undefined); } catch (e) { return reject(micError(e)); }
+      const chunks = [];
+      let heard = false, done = false, ctx = null, timer = null, metered = false;
+      const t0 = Date.now();
+      let lastLoud = t0, floor = 0.01, samples = 0;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearInterval(timer);
+        try { ctx && ctx.close(); } catch {}
+        try { rec.state !== 'inactive' && rec.stop(); } catch {}
+      };
+      stopNow = finish;
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = () => {
+        stopNow = null;
+        resolve({ blob: new Blob(chunks, { type: (rec.mimeType || type || 'audio/webm').split(';')[0] }), heard: heard || !metered });
+      };
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        ctx = new AC();
+        try { await ctx.resume(); } catch {}
+        if (ctx.state !== 'running') throw new Error('meter asleep');   // some phones: no volume meter
+        metered = true;
+        const src = ctx.createMediaStreamSource(s);
+        const an = ctx.createAnalyser();
+        an.fftSize = 1024;
+        src.connect(an);
+        const buf = new Float32Array(an.fftSize);
+        timer = setInterval(() => {
+          an.getFloatTimeDomainData(buf);
+          let sum = 0;
+          for (const v of buf) sum += v * v;
+          const rms = Math.sqrt(sum / buf.length);
+          const now = Date.now();
+          if (samples < 4) { floor = Math.max(floor, rms); samples++; }     // learn the room's noise first
+          if (rms > Math.max(0.02, floor * 2.5)) { heard = true; lastLoud = now; }
+          if (heard && now - lastLoud > silenceMs) finish();               // stopped talking
+          if (!heard && now - t0 > waitMs) finish();                       // never started
+          if (now - t0 > maxMs) finish();                                  // too long
+        }, 100);
+      } catch { try { ctx && ctx.close(); } catch {} ctx = null; metered = false; setTimeout(finish, Math.min(maxMs, 7000)); }   // no volume meter: record 7 seconds (tap 🎤 to finish sooner)
+      rec.start(250);
+    });
+  }
+  async function transcribe(blob) {
+    const fd = new FormData();
+    const ext = blob.type.includes('mp4') ? 'mp4' : blob.type.includes('ogg') ? 'ogg' : 'webm';
+    fd.append('audio', blob, 'speech.' + ext);
+    const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || "I couldn't hear that — try again, or type it.");
+    return (d.text || '').trim();
+  }
+  return { getMic, release, record, transcribe, permissionState, stop: () => stopNow && stopNow(), get busy() { return !!stopNow; } };
+})();
+
+function micHelpSteps() {
+  const ua = navigator.userAgent;
+  if (/iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+    return '1. Tap the "aA" (or ⋯) button in the address bar.\n2. Tap "Website Settings".\n3. Set Microphone to "Allow".\n4. Reload this page.\n\nIf that doesn\'t show up: open the iPhone Settings app → Safari → Microphone → Allow.';
+  }
+  if (/android/i.test(ua)) {
+    return '1. Tap the 🔒 (or ⓘ) next to the web address.\n2. Tap "Permissions" (or "Site settings").\n3. Turn Microphone on.\n4. Reload this page.';
+  }
+  return '1. Click the 🔒 (or the settings icon) at the left of the address bar.\n2. Turn "Microphone" on (or set it to Allow).\n3. Reload this page.\n\nAlso check that your computer lets the browser use the microphone (on Windows: Settings → Privacy → Microphone).';
+}
+function handleMicError(e) {
+  const code = e && e.code;
+  if (code === 'blocked') {
+    uiAlert('Your microphone is blocked 🎤', 'ThinkStep needs your OK to hear you. To turn it on:\n\n' + micHelpSteps(), '🔇');
+  } else if (code === 'nomic') {
+    uiAlert('No microphone found', 'Plug in a microphone or headset, or try on a phone or tablet. You can always type your question instead!', '🎤');
+  } else if (code === 'busy') {
+    uiAlert('Microphone is busy', 'Another app (like a video call) might be using your microphone. Close it and try again.', '🎤');
+  } else if (code === 'unsupported') {
+    uiAlert('Voice not available here', isSecureContext
+      ? "This browser can't use the microphone. Try Chrome, Edge, Safari or Firefox."
+      : 'The microphone only works when ThinkStep is opened with https://.', '🎤');
   } else {
-    promptEl.placeholder = originalPlaceholder;
+    showToast(e && e.message ? e.message : 'The microphone had a problem — try again.');
   }
 }
-
-if (!SpeechRecognitionAPI) {
-  micBtn.disabled = true;
-  micBtn.title = 'Voice input isn\'t supported in this browser — try Chrome or Edge.';
-} else if (!isSecureContext) {
-  micBtn.disabled = true;
-  micBtn.title = 'Voice input only works on https:// or on localhost. Open ThinkStep at http://localhost:5000 on this computer to use the mic.';
-} else {
-  const recognition = new SpeechRecognitionAPI();
-  recognition.lang = 'en-US';
-  recognition.continuous = false;
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
-  let listening = false;
-  let baseText = '';
-
-  micBtn.addEventListener('click', () => {
-    if (listening) {
-      recognition.stop();
-      return;
-    }
-    baseText = promptEl.value ? promptEl.value.trim() + ' ' : '';
-    try {
-      recognition.start();
-    } catch (err) {
-      // start() throws if it's already running from a prior click that
-      // hadn't fully stopped yet — just ignore, it'll settle itself.
-    }
-  });
-
-  recognition.addEventListener('start', () => {
-    listening = true;
-    setMicState('listening');
-  });
-
-  recognition.addEventListener('result', (e) => {
-    let transcript = '';
-    for (let i = 0; i < e.results.length; i++) {
-      transcript += e.results[i][0].transcript;
-    }
-    promptEl.value = baseText + transcript;
-  });
-
-  recognition.addEventListener('end', () => {
-    listening = false;
-    setMicState('idle');
-    promptEl.focus();
-  });
-
-  recognition.addEventListener('error', (e) => {
-    listening = false;
-    const messages = {
-      'not-allowed': "Mic access was blocked — allow microphone permission for this site and try again.",
-      'service-not-allowed': "Mic access was blocked — allow microphone permission for this site and try again.",
-      'no-speech': "Didn't catch that — try speaking again.",
-      'audio-capture': "No microphone found on this device.",
-      'network': "Voice input needs an internet connection to work.",
-      'aborted': null, // user tapped stop; not an error worth showing
-    };
-    const msg = messages[e.error] !== undefined ? messages[e.error] : "Voice input had a problem — try again.";
-    setMicState(msg ? 'error' : 'idle', msg);
-  });
+async function micReady() {
+  // If the mic is already blocked the browser won't ask again, so explain
+  // right away instead of failing silently.
+  if ((await VoiceRec.permissionState()) === 'denied') { handleMicError({ code: 'blocked' }); return false; }
+  try { await VoiceRec.getMic(); return true; } catch (e) { handleMicError(e); return false; }
 }
+
+function setMicState(state, message) {
+  // state: 'idle' | 'listening' | 'working' | 'error'
+  micBtn.classList.toggle('recording', state === 'listening');
+  if (state === 'listening') promptEl.placeholder = '🎤 Listening… speak now (tap 🎤 to finish)';
+  else if (state === 'working') promptEl.placeholder = '✍️ Writing down what you said…';
+  else if (state === 'error') {
+    promptEl.placeholder = message || 'Voice input had a problem — try again';
+    setTimeout(() => { promptEl.placeholder = originalPlaceholder; }, 2500);
+  } else promptEl.placeholder = originalPlaceholder;
+}
+
+let micRecording = false;
+micBtn.addEventListener('click', async () => {
+  if (micRecording) { VoiceRec.stop(); return; }           // tap again = done talking
+  if (talkModeOn) return;
+  if (!currentUser && guestAgeStatus !== 'ok') { openAgeModal(); return; }
+  if (!(await micReady())) return;
+  micRecording = true;
+  setMicState('listening');
+  try {
+    const { blob, heard } = await VoiceRec.record({ maxMs: 30000, silenceMs: 1800, waitMs: 8000 });
+    micRecording = false;
+    VoiceRec.release();
+    if (!heard || blob.size < 1500) { setMicState('error', "Didn't hear anything — try again a little louder."); return; }
+    setMicState('working');
+    micBtn.disabled = true;
+    const text = await VoiceRec.transcribe(blob);
+    setMicState('idle');
+    if (!text) { setMicState('error', "Didn't catch that — try again."); return; }
+    const base = promptEl.value.trim();
+    promptEl.value = base ? base + ' ' + text : text;
+    promptEl.focus();
+  } catch (e) {
+    micRecording = false;
+    VoiceRec.release();
+    setMicState('idle');
+    handleMicError(e);
+  } finally {
+    micBtn.disabled = false;
+  }
+});
+if (!canRecord) micBtn.title = "Voice input isn't available in this browser";
 
 /* ---------- AI provider connection check ---------- */
 async function checkConnection() {
