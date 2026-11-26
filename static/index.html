@@ -640,7 +640,7 @@
   }
   .feedback-card { background: linear-gradient(160deg, var(--primary-light), var(--card)); }
   /* Quick feedback ask that pops into the chat now and then */
-  #uiText { white-space: pre-line; text-align: left; }
+  #uiDialog #uiText { white-space: pre-line; text-align: left; }
   .fb-ask { align-self: center; width: min(440px, 94%); margin: 6px auto 10px; background: var(--card);
             border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-md);
             padding: 14px 16px; text-align: center; position: relative; animation: msgIn .3s var(--ease); }
@@ -3571,7 +3571,9 @@ document.getElementById('exportBtn').addEventListener('click', () => {
    microphone?" box; if the mic is blocked, a ThinkStep box explains how to
    turn it back on. */
 const micBtn = document.getElementById('micBtn');
-if (window.matchMedia && matchMedia('(max-width: 680px)').matches) promptEl.placeholder = 'Ask a question…';
+// Shorter hint where the typing box is narrow, so it never gets cut off.
+if (window.matchMedia && matchMedia('(max-width: 380px)').matches) promptEl.placeholder = 'Ask here…';
+else if (window.matchMedia && matchMedia('(max-width: 1000px)').matches) promptEl.placeholder = 'Ask a question…';
 const originalPlaceholder = promptEl.placeholder;
 const isSecureContext = window.isSecureContext ||
   location.hostname === 'localhost' || location.hostname === '127.0.0.1';
