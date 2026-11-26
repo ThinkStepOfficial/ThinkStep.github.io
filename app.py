@@ -2133,7 +2133,10 @@ JSON only:
 
 "web" is 1 ONLY when a good answer needs facts the tutor may not reliably
 know: recent or current events, today's numbers (populations, records,
-prices), or a specific named thing it might misremember. Normal school
+prices), or a specific named thing it might misremember. The tutor's own
+knowledge stops around 2024, so anything about 2024, 2025, the current year,
+"latest", "newest", "current", "now" or "this year" is "web": 1. The real
+date is given at the top of the transcript. Normal school
 topics the tutor already knows (math, grammar, how volcanoes work, the
 causes of WW2) are "web": 0. Off-task messages are always "web": 0.
 
@@ -2211,6 +2214,13 @@ def _parse_gate_verdict(text):
     return None
 
 
+def today_line():
+    """The AIs only learned about the world up to about 2024, so without this
+    they think it's still 2024. Every AI that answers or searches gets it."""
+    now = datetime.now(timezone.utc)
+    return f"TODAY'S DATE: {now.strftime('%A, %B')} {now.day}, {now.year} (the current year is {now.year})."
+
+
 def _format_gate_transcript(history, latest_label="LATEST STUDENT MESSAGE TO CLASSIFY"):
     recent = history[-TOPIC_GATE_CONTEXT_MESSAGES:]
     lines = []
@@ -2238,7 +2248,7 @@ def topic_gate_check(history, api_key):
     allow = {"blocked": False, "web": False}
     if not api_key or not history:
         return allow
-    transcript = _format_gate_transcript(history)
+    transcript = today_line() + "\n\n" + _format_gate_transcript(history)
     headers = {"Authorization": f"Bearer {api_key}"}
     now = datetime.now(timezone.utc).timestamp()
     for gate_model in TOPIC_GATE_MODELS:
@@ -2335,6 +2345,9 @@ Rules:
 - Research the SCHOOL meaning of the topic, not products or brands. For
   example, if the student asked how to say the word "word", research the
   pronunciation of the English word "word", not Microsoft Word.
+- The real date is at the top of the request. Always look for the NEWEST
+  information (this year and last year), not old pages, and say the year
+  of each fact when it matters, like "(2026)".
 - Facts only. Do not solve homework problems or write the student's work.
 - No links or web addresses.
 - Only include information that is appropriate for children. Skip anything
@@ -2356,12 +2369,80 @@ def _clean_web_notes(text):
 
 
 def web_research(history, api_key):
+    """Fact notes for the latest question, or None. Groq's web search first;
+    if that fails or finds nothing, Wikipedia (free, no key, kid-safe)."""
+    notes = groq_web_research(history, api_key)
+    if notes:
+        return notes
+    notes = wikipedia_research(history)
+    if notes:
+        print(f"[ThinkStep] Web research: used Wikipedia backup ({len(notes)} chars).")
+    return notes
+
+
+# ---- Wikipedia backup search ----
+WIKI_API = "https://en.wikipedia.org/w/api.php"
+WIKI_HEADERS = {"User-Agent": "ThinkStep/1.0 (free homework tutor for kids; https://thinkstepofficial.github.io/thinkstep-tutor/)"}
+_WIKI_FILLER = re.compile(
+    r"\b(please|can you|could you|tell me|i need to know|for my (homework|project|class|school)|"
+    r"search it up|look it up|search|look up|what is|what's|what are|who is|who was|who won|when did|"
+    r"when was|where is|how many|how much|the latest|latest|newest|current|right now|now)\b", re.I)
+
+
+def _wiki_query(history):
+    """Words to search Wikipedia for: the latest question, plus the one
+    before it if the latest is short (like "search it up")."""
+    users = [m.get("content", "") for m in history if m.get("role") == "user" and isinstance(m.get("content"), str)]
+    if not users:
+        return ""
+    q = users[-1]
+    if len(q.split()) < 4 and len(users) > 1:
+        q = users[-2] + " " + q
+    q = _WIKI_FILLER.sub(" ", q)
+    q = re.sub(r"[^\w\s'-]", " ", q)
+    return " ".join(q.split())[:200]
+
+
+def wikipedia_research(history):
+    """Short fact notes from Wikipedia's top matches, or None."""
+    q = _wiki_query(history)
+    if len(q) < 2:
+        return None
+    try:
+        r = requests.get(WIKI_API, headers=WIKI_HEADERS, timeout=(4, 8), params={
+            "action": "query", "list": "search", "srsearch": q, "srlimit": 3,
+            "srprop": "", "format": "json", "formatversion": 2})
+        if r.status_code != 200:
+            return None
+        titles = [h.get("title") for h in ((r.json().get("query") or {}).get("search") or []) if h.get("title")][:2]
+        if not titles:
+            return None
+        r = requests.get(WIKI_API, headers=WIKI_HEADERS, timeout=(4, 8), params={
+            "action": "query", "prop": "extracts", "exintro": 1, "explaintext": 1, "exsentences": 5,
+            "redirects": 1, "titles": "|".join(titles), "format": "json", "formatversion": 2})
+        if r.status_code != 200:
+            return None
+        pages = (r.json().get("query") or {}).get("pages") or []
+        by_title = {p.get("title"): (p.get("extract") or "").strip() for p in pages}
+        lines = []
+        for t in titles:
+            text = by_title.get(t) or next((v for k, v in by_title.items() if v and k.lower() == t.lower()), "")
+            if text:
+                lines.append(f"- {' '.join(text.split())} (Wikipedia: {t})")
+        notes = "\n".join(lines)
+        return _clean_web_notes(notes) if notes else None
+    except Exception as e:
+        print(f"[ThinkStep] Wikipedia backup error: {type(e).__name__}")
+        return None
+
+
+def groq_web_research(history, api_key):
     """Returns cleaned fact notes for the latest question, or None."""
     if not api_key or not history:
         return None
     headers = {"Authorization": f"Bearer {api_key}"}
     # last few chat lines only — never the student's name, grade or profile
-    request_text = _format_gate_transcript(history, "LATEST STUDENT QUESTION TO RESEARCH")
+    request_text = today_line() + "\n\n" + _format_gate_transcript(history, "LATEST STUDENT QUESTION TO RESEARCH")
     for research_model in WEB_RESEARCH_MODELS:
         try:
             r = requests.post(GROQ_API_URL, headers=headers, json={
@@ -4688,15 +4769,19 @@ def chat():
     # models thinking harder (see TUTOR_ATTEMPTS). Putting the student info
     # first (as this used to) made every student's request start
     # differently, so nothing was ever reused.
-    if student_info_lines:
-        system_prompt = (
-            SYSTEM_PROMPT
-            + "\n=== STUDENT INFO (follow this in every reply) ===\n"
-            + "\n".join(student_info_lines)
-            + "\n=== END STUDENT INFO ===\n"
-        )
-    else:
-        system_prompt = SYSTEM_PROMPT
+    # Today's date goes after the fixed instructions (so the cached part
+    # stays the same). Without it the tutor thinks it's still 2024.
+    student_info_lines.append(
+        f"- {today_line()} Your own knowledge stops around 2024. If WEB NOTES are given below, "
+        "trust them over what you remember, and never say something newer 'hasn't happened yet'. "
+        "If there are no web notes and the question is about something after 2024, say you're not "
+        "sure about the newest information instead of guessing.")
+    system_prompt = (
+        SYSTEM_PROMPT
+        + "\n=== STUDENT INFO (follow this in every reply) ===\n"
+        + "\n".join(student_info_lines)
+        + "\n=== END STUDENT INFO ===\n"
+    )
 
     messages = [{"role": "system", "content": system_prompt}] + history
 
