@@ -135,6 +135,9 @@ def relax_spam_limits(module):
     # The background Cloudflare chat review would make extra (fake) web calls
     # in tests that set Cloudflare keys; tests about it call review_chat().
     module.review_chat_later = lambda *a, **k: None
+    # Never reach the real Wikipedia from tests; tests about it use the real one.
+    module._real_wikipedia_research = module.wikipedia_research
+    module.wikipedia_research = lambda history: None
 
 
 def real_spam_limits(module):
