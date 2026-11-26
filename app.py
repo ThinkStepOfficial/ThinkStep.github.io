@@ -4370,6 +4370,10 @@ TRANSCRIBE_MODEL = "whisper-large-v3-turbo"
 TRANSCRIBE_MAX_BYTES = 3 * 1024 * 1024           # about a minute of compressed audio
 TRANSCRIBE_PER_HOUR = 120
 _transcribe_limiter = SlidingWindowLimiter(TRANSCRIBE_PER_HOUR, 3600)
+# "Live" previews while you're still talking (the words appear as you speak).
+# They have their own, bigger allowance so they never use up the real ones.
+TRANSCRIBE_PREVIEWS_PER_HOUR = 600
+_transcribe_preview_limiter = SlidingWindowLimiter(TRANSCRIBE_PREVIEWS_PER_HOUR, 3600)
 _AUDIO_TYPES = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "mp4", "audio/mpeg": "mp3",
                 "audio/wav": "wav", "audio/x-wav": "wav", "audio/aac": "m4a", "video/webm": "webm",
                 "video/mp4": "mp4"}
@@ -4393,7 +4397,8 @@ def transcribe():
     audio = f.read(TRANSCRIBE_MAX_BYTES + 1)
     if not audio or len(audio) > TRANSCRIBE_MAX_BYTES:
         return jsonify({"error": "That recording is too long — try a shorter question."}), 400
-    if _transcribe_limiter.hit(visitor_id()):
+    preview = request.form.get("partial") == "1"
+    if (_transcribe_preview_limiter if preview else _transcribe_limiter).hit(visitor_id()):
         return jsonify({"error": "Lots of talking! Take a short break, or type your question."}), 429
     key = _load_groq_api_key()
     if not key:
@@ -4405,8 +4410,9 @@ def transcribe():
                                 "response_format": "json", "temperature": "0"},
                           timeout=(5, 30))
         if r.status_code != 200:
-            print(f"[ThinkStep] Voice typing: Groq said {r.status_code}.")
-            return jsonify({"error": "I couldn't hear that right now — try again, or type it."}), 502
+            print(f"[ThinkStep] Voice typing{' preview' if preview else ''}: Groq said {r.status_code}.")
+            return jsonify({"error": "I couldn't hear that right now — try again, or type it."}), \
+                (429 if r.status_code == 429 else 502)
         text = " ".join(str((r.json() or {}).get("text") or "").split())
     except Exception as e:
         print(f"[ThinkStep] Voice typing error ({type(e).__name__}).")
