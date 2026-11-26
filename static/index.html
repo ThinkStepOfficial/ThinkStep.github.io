@@ -59,7 +59,8 @@
   .app {
     display: grid;
     grid-template-columns: 240px 1fr 264px;
-    grid-template-rows: auto auto 1fr;
+    /* header, then up to 3 banners (connection, chat notice, seasonal), then the page */
+    grid-template-rows: auto auto auto auto 1fr;
     height: 100vh;
     height: 100dvh;
   }
@@ -104,6 +105,7 @@
   }
 
   /* CONNECTION BANNER */
+  .app > .sidebar-left, .app > .chat-area, .app > .sidebar-right { grid-row: 5; }
   #connBanner {
     display: none;
     grid-column: 1 / 4;
@@ -154,6 +156,15 @@
     padding: 0 2px;
   }
   #seasonalBanner .close-banner:hover { opacity: 1; }
+  #chatNotice { display: none; grid-column: 1 / 4; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+                padding: 9px 20px; font-size: 14px; text-align: center; background: #fff8ec; color: #6b4a12;
+                border-bottom: 1px solid #f5d6a1; }
+  #chatNotice.show { display: flex; animation: slideDown .2s var(--ease); }
+  #chatNotice a { color: inherit; font-weight: 700; }
+  #chatNotice button { background: #6b4a12; color: #fff; border: 0; border-radius: 999px; padding: 4px 12px;
+                       font-size: 13px; font-weight: 700; cursor: pointer; box-shadow: none; }
+  :root[data-theme="dark"] #chatNotice { background: #2a2416; color: #ead9b0; border-color: #4d4122; }
+  :root[data-theme="dark"] #chatNotice button { background: #ead9b0; color: #2a2416; }
   @keyframes slideDown {
     from { opacity: 0; transform: translateY(-6px); }
     to { opacity: 1; transform: translateY(0); }
@@ -1340,6 +1351,12 @@
   </header>
 
   <div id="connBanner">⚠️ Can't reach ThinkStep's AI provider right now. Try reloading this page in a moment.</div>
+
+  <div id="chatNotice" role="status">
+    <span>📢 <b>New:</b> chats are saved for 30 days, and the person who runs ThinkStep can read them to keep everyone safe.
+      Don't share personal info like your address or phone number. <a href="/privacy" target="_blank" rel="noopener">Privacy</a></span>
+    <button type="button" id="chatNoticeOk">Got it</button>
+  </div>
 
   <div id="seasonalBanner">
     <span id="seasonalBannerText"></span>
@@ -2883,6 +2900,19 @@ document.getElementById('uiForm').addEventListener('submit', (e) => { e.preventD
 document.getElementById('uiCancel').addEventListener('click', () => uiDialogEl._cancel && uiDialogEl._cancel());
 uiDialogEl.addEventListener('click', (e) => { if (e.target === uiDialogEl && uiDialogEl._cancel) uiDialogEl._cancel(); });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && uiDialogEl.classList.contains('open') && uiDialogEl._cancel) uiDialogEl._cancel(); });
+
+/* Tell everyone (once) that chats are now saved and can be read by the
+   operator — it's also on the Privacy page. "Got it" hides it on this device. */
+(function chatNotice() {
+  const el = document.getElementById('chatNotice');
+  let seen = false;
+  try { seen = localStorage.getItem('thinkstep_chat_notice_v1') === '1'; } catch {}
+  if (!seen) el.classList.add('show');
+  document.getElementById('chatNoticeOk').addEventListener('click', () => {
+    el.classList.remove('show');
+    try { localStorage.setItem('thinkstep_chat_notice_v1', '1'); } catch {}
+  });
+})();
 
 /* The "Get the app" feature was removed. Anyone who already had its helper
    (service worker) gets it switched off here, so nothing is left behind. */

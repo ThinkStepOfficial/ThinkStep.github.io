@@ -191,6 +191,23 @@
   #setupWarnings li { margin: 4px 0; }
   .refresh-note { text-align: center; font-size: 11.5px; color: var(--muted); margin-top: 16px; }
   .stat-box.alert .num { color: #c0392b; }
+  .chat-tools { display: flex; gap: 8px; margin: 4px 0 8px; }
+  .chat-tools input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; font: inherit; font-size: 13.5px; }
+  .chat-btn { padding: 7px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card, #fff);
+              color: var(--text); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .chat-btn:hover { border-color: #2f6fed; }
+  .chat-person { display: block; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--border);
+                 padding: 10px 2px; cursor: pointer; font: inherit; color: var(--text); }
+  .chat-person:hover { background: rgba(47,111,237,.06); }
+  .chat-person .who { font-weight: 700; font-size: 13.5px; }
+  .chat-person .meta { color: var(--muted); font-size: 11.5px; margin-left: 6px; }
+  .chat-person .last { color: var(--muted); font-size: 12.5px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-q, .chat-a { border-radius: 12px; padding: 8px 11px; margin: 6px 0; font-size: 13px; line-height: 1.5;
+                     white-space: pre-wrap; word-break: break-word; max-width: 92%; }
+  .chat-q { background: #2f6fed; color: #fff; margin-left: auto; }
+  .chat-a { background: #eef4ff; color: #1b2740; border: 1px solid #dbe6fb; }
+  .chat-a.blocked { background: #fff8ec; border-color: #f5d6a1; }
+  .chat-when { font-size: 11px; color: var(--muted); text-align: center; margin-top: 12px; }
   .flag-row {
     padding: 12px 0;
     border-bottom: 1px solid var(--border);
@@ -307,6 +324,16 @@
     </div>
 
     <div class="list-card" style="margin-top:16px;">
+      <h2>Chats <span style="font-weight:400;color:var(--muted);font-size:12.5px;">(last 30 days, then deleted for good)</span></h2>
+      <div class="chat-tools">
+        <input type="search" id="chatFilter" placeholder="🔍 Filter by name or guest ID" autocomplete="off">
+        <button type="button" id="chatsLoadBtn" class="chat-btn">Load chats</button>
+      </div>
+      <div id="chatsPeople"><div class="empty-note">Click "Load chats" to see everyone's chats.</div></div>
+      <div id="chatsThread" style="display:none;"></div>
+    </div>
+
+    <div class="list-card" style="margin-top:16px;">
       <h2>AI providers</h2>
       <div id="providersList"><div class="empty-note">Loading…</div></div>
     </div>
@@ -361,6 +388,77 @@ function escapeHtml(s) {
   d.textContent = s == null ? '' : String(s);
   return d.innerHTML;
 }
+
+/* ---------- Chats (loaded only when you click, never every 2 seconds) ---------- */
+let chatPeople = [];
+const chatsPeopleEl = document.getElementById('chatsPeople');
+const chatsThreadEl = document.getElementById('chatsThread');
+const chatFilterEl = document.getElementById('chatFilter');
+const chatsLoadBtn = document.getElementById('chatsLoadBtn');
+function fmtTime(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function renderChatPeople() {
+  const f = chatFilterEl.value.trim().toLowerCase();
+  const list = chatPeople.filter(p => !f || (p.who || '').toLowerCase().includes(f));
+  chatsPeopleEl.innerHTML = list.length ? list.map((p, i) => `
+    <button type="button" class="chat-person" data-i="${chatPeople.indexOf(p)}">
+      <span class="who">${p.guest ? '👤' : '🎓'} ${escapeHtml(p.who || 'Someone')}</span>
+      <span class="meta">${p.grade ? 'grade ' + escapeHtml(p.grade) + ' · ' : ''}${p.count} question${p.count === 1 ? '' : 's'} · last ${escapeHtml(fmtTime(p.last))}</span>
+      <div class="last">“${escapeHtml(p.lastQ || '')}”</div>
+    </button>`).join('')
+    : `<div class="empty-note">${chatPeople.length ? 'Nobody matches that.' : 'No chats saved yet.'}</div>`;
+  chatsPeopleEl.querySelectorAll('.chat-person').forEach(b =>
+    b.addEventListener('click', () => openChatThread(chatPeople[+b.dataset.i])));
+}
+async function loadChatPeople() {
+  chatsLoadBtn.disabled = true;
+  chatsPeopleEl.innerHTML = '<div class="empty-note">Loading…</div>';
+  chatsThreadEl.style.display = 'none';
+  chatsPeopleEl.style.display = '';
+  try {
+    const res = await fetch('/api/admin/chats');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not load chats.');
+    chatPeople = data.people || [];
+    renderChatPeople();
+    chatsLoadBtn.textContent = '↻ Refresh';
+  } catch (e) {
+    chatsPeopleEl.innerHTML = `<div class="empty-note">${escapeHtml(e.message)}</div>`;
+  } finally {
+    chatsLoadBtn.disabled = false;
+  }
+}
+async function openChatThread(p) {
+  chatsPeopleEl.style.display = 'none';
+  chatsThreadEl.style.display = '';
+  chatsThreadEl.innerHTML = '<div class="empty-note">Loading…</div>';
+  try {
+    const res = await fetch('/api/admin/chats?person=' + encodeURIComponent(p.person));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not load this chat.');
+    const body = (data.messages || []).map(m => {
+      const when = fmtTime(m.time);
+      return `<div class="chat-when">${escapeHtml(when)}</div>
+        <div class="chat-q">${m.photo ? '📷 (sent a homework photo) ' : ''}${escapeHtml(m.q)}</div>
+        <div class="chat-a${m.blocked ? ' blocked' : ''}">${m.blocked ? '🚫 Off-topic, not answered: ' : ''}${escapeHtml(m.a)}</div>`;
+    }).join('');
+    chatsThreadEl.innerHTML = `<button type="button" class="chat-btn" id="chatBack">← All chats</button>
+      <div style="margin:10px 0 4px;font-weight:700;">${p.guest ? '👤' : '🎓'} ${escapeHtml(p.who || '')}
+        <span class="meta" style="color:var(--muted);font-weight:400;font-size:12px;">${p.grade ? 'grade ' + escapeHtml(p.grade) : ''}</span></div>
+      <div style="display:flex;flex-direction:column;">${body || '<div class="empty-note">Nothing saved.</div>'}</div>`;
+  } catch (e) {
+    chatsThreadEl.innerHTML = `<button type="button" class="chat-btn" id="chatBack">← All chats</button>
+      <div class="empty-note">${escapeHtml(e.message)}</div>`;
+  }
+  document.getElementById('chatBack').addEventListener('click', () => {
+    chatsThreadEl.style.display = 'none';
+    chatsPeopleEl.style.display = '';
+  });
+}
+chatsLoadBtn.addEventListener('click', loadChatPeople);
+chatFilterEl.addEventListener('input', renderChatPeople);
 
 function showDashboard() {
   loginCard.style.display = 'none';
